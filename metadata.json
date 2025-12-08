@@ -1,0 +1,7 @@
+{
+  "name": "HandTracking 3D Pro",
+  "description": "Real-time 3D hand tracking and gesture analysis using MediaPipe and Gemini 2.5 Flash.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
