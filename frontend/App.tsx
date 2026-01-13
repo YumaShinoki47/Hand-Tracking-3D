@@ -1,28 +1,24 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { initializeHandLandmarker } from './services/visionService';
-import { analyzeHandGesture } from './services/geminiService';
 import Scene3D from './components/Scene3D';
-import { Landmark, GestureStatus, AnalysisResult } from './types';
+import { Landmark, HandLandmarkerResult } from './types';
 import { HandLandmarker } from '@mediapipe/tasks-vision';
 
 const App: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null); // For capturing snapshots
   const [isWebcamRunning, setIsWebcamRunning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
   // Using State for rendering 3D scene (60fps updates might be better with Refs + useFrame in a more complex app, 
   // but for this scale React state is acceptable for the coordinates data flow to the Scene component)
-  const [handsResult, setHandsResult] = useState<{ landmarks: Landmark[][], handednesses: any[][] } | null>(null);
-
-  // Gesture Analysis State
-  const [analysisStatus, setAnalysisStatus] = useState<GestureStatus>(GestureStatus.IDLE);
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [handsResult, setHandsResult] = useState<HandLandmarkerResult | null>(null);
 
   // Refs for loop
   const lastVideoTime = useRef(-1);
   const requestRef = useRef<number>(0);
+  const prevLandmarksRef = useRef<Landmark[][] | null>(null);
+  const logCounterRef = useRef(0);
 
   // Initialize MediaPipe
   useEffect(() => {
@@ -46,16 +42,63 @@ const App: React.FC = () => {
     const handLandmarker = await initializeHandLandmarker(); 
 
     if (video && handLandmarker && isWebcamRunning) {
+      // Skip until video is ready
+      if (!video.videoWidth || !video.videoHeight) {
+        requestRef.current = requestAnimationFrame(() => predictWebcam());
+        return;
+      }
+
       const startTimeMs = performance.now();
       if (video.currentTime !== lastVideoTime.current) {
         lastVideoTime.current = video.currentTime;
         const result = handLandmarker.detectForVideo(video, startTimeMs);
         
         if (result.landmarks.length > 0) {
+          // Frame-to-frame smoothing (simple EMA)
+          const alpha = 0.4; // weight to current frame
+          const smoothedLandmarks = result.landmarks.map((hand, handIdx) =>
+            hand.map((lm, idx) => {
+              const prev = prevLandmarksRef.current?.[handIdx]?.[idx];
+              if (!prev) return lm;
+              return {
+                x: prev.x * (1 - alpha) + lm.x * alpha,
+                y: prev.y * (1 - alpha) + lm.y * alpha,
+                z: prev.z * (1 - alpha) + lm.z * alpha,
+              };
+            })
+          );
+
+          prevLandmarksRef.current = smoothedLandmarks;
           setHandsResult({
-            landmarks: result.landmarks,
-            handednesses: result.handednesses
+            landmarks: smoothedLandmarks,
+            handednesses: result.handednesses,
+            worldLandmarks: result.worldLandmarks
           });
+
+          // #region agent log
+          if (logCounterRef.current++ % 20 === 0) {
+            const wristNorm = smoothedLandmarks[0]?.[0];
+            const wristWorld = (result.worldLandmarks as any)?.[0]?.[0];
+            fetch('http://127.0.0.1:7242/ingest/5e7dfa0e-623c-476f-bd4d-f4fc7374b309',{
+              method:'POST',
+              headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({
+                sessionId:'debug-session',
+                runId:'run2',
+                hypothesisId:'H5',
+                location:'App.tsx:predictWebcam',
+                message:'World landmarks availability',
+                data:{
+                  videoSize:{w:video.videoWidth,h:video.videoHeight},
+                  hasWorld: !!(result.worldLandmarks && result.worldLandmarks.length),
+                  wristNorm: wristNorm ? {x:wristNorm.x,y:wristNorm.y,z:wristNorm.z}:null,
+                  wristWorld: wristWorld ? {x:wristWorld.x,y:wristWorld.y,z:wristWorld.z}:null
+                },
+                timestamp: Date.now()
+              })
+            }).catch(()=>{});
+          }
+          // #endregion
         }
       }
       requestRef.current = requestAnimationFrame(() => predictWebcam());
@@ -93,41 +136,11 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Snapshot and Gemini Analysis
-  const handleAnalyze = async () => {
-    if (!videoRef.current || !canvasRef.current) return;
-    
-    setAnalysisStatus(GestureStatus.ANALYZING);
-    setAnalysisResult(null);
-
-    try {
-      // Draw video frame to canvas
-      const canvas = canvasRef.current;
-      const video = videoRef.current;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const imageBase64 = canvas.toDataURL('image/jpeg', 0.8);
-        
-        // Call Gemini
-        const result = await analyzeHandGesture(imageBase64);
-        setAnalysisResult(result);
-        setAnalysisStatus(GestureStatus.SUCCESS);
-      }
-    } catch (e) {
-      console.error(e);
-      setAnalysisStatus(GestureStatus.ERROR);
-    }
-  };
-
   return (
     <div className="relative w-full h-screen bg-gray-900 overflow-hidden font-sans">
       {/* Hidden Video & Canvas for processing */}
       <div className="absolute opacity-0 pointer-events-none">
         <video ref={videoRef} autoPlay playsInline muted style={{ transform: 'scaleX(-1)' }} />
-        <canvas ref={canvasRef} />
       </div>
 
       {/* Main 3D Scene */}
@@ -137,17 +150,8 @@ const App: React.FC = () => {
 
       {/* UI Overlay */}
       <div className="absolute inset-0 z-10 pointer-events-none flex flex-col justify-between p-6">
-        {/* Header */}
-        <div className="flex justify-between items-start pointer-events-auto">
-          <div>
-            <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
-              HandTracking 3D Pro
-            </h1>
-            <p className="text-gray-400 text-sm mt-1">
-              Powered by MediaPipe & Gemini
-            </p>
-          </div>
-          
+        {/* Header (status only) - 左上 */}
+        <div className="flex justify-start items-start pointer-events-auto">
           <div className="bg-gray-800/80 backdrop-blur-md p-4 rounded-xl border border-gray-700 shadow-xl max-w-xs">
             <h3 className="text-xs font-bold text-gray-500 uppercase mb-2 tracking-wider">Status</h3>
             <div className="space-y-2">
@@ -204,67 +208,6 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Bottom Panel - Analysis */}
-        <div className="flex justify-center items-end pointer-events-auto space-x-4">
-          {/* Analysis Result Card */}
-          {analysisStatus === GestureStatus.SUCCESS && analysisResult && (
-            <div className="mb-8 bg-gray-900/90 backdrop-blur-xl border border-blue-500/30 p-6 rounded-2xl max-w-md w-full shadow-2xl animate-in fade-in slide-in-from-bottom-4">
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="text-xl font-bold text-white">{analysisResult.gesture}</h2>
-                <span className="px-2 py-1 bg-blue-500/20 text-blue-300 text-xs rounded-full border border-blue-500/20">
-                  {analysisResult.confidence} Confidence
-                </span>
-              </div>
-              <p className="text-gray-300 text-sm leading-relaxed">
-                {analysisResult.description}
-              </p>
-              <button 
-                onClick={() => setAnalysisStatus(GestureStatus.IDLE)}
-                className="mt-4 text-xs text-gray-500 hover:text-white underline w-full text-center"
-              >
-                Dismiss
-              </button>
-            </div>
-          )}
-
-          {/* Analyze Button */}
-          {isWebcamRunning && analysisStatus !== GestureStatus.SUCCESS && (
-            <div className="mb-8">
-              <button
-                onClick={handleAnalyze}
-                disabled={analysisStatus === GestureStatus.ANALYZING}
-                className={`
-                  flex items-center space-x-3 px-6 py-3 rounded-xl border border-white/10 shadow-lg backdrop-blur-md transition-all
-                  ${analysisStatus === GestureStatus.ANALYZING 
-                    ? 'bg-gray-700/50 cursor-wait' 
-                    : 'bg-white/10 hover:bg-white/20 active:scale-95 hover:border-blue-400/50'}
-                `}
-              >
-                {analysisStatus === GestureStatus.ANALYZING ? (
-                   <>
-                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    <span className="text-blue-300 font-medium">Asking Gemini...</span>
-                   </>
-                ) : (
-                  <>
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-                      </svg>
-                    </div>
-                    <div className="text-left">
-                      <div className="text-sm font-semibold text-white">Analyze Gesture</div>
-                      <div className="text-xs text-gray-400">Gemini 2.5 Flash</div>
-                    </div>
-                  </>
-                )}
-              </button>
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );

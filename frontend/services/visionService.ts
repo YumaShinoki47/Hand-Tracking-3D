@@ -15,7 +15,9 @@ export const initializeHandLandmarker = async (): Promise<HandLandmarker> => {
       delegate: "GPU"
     },
     runningMode: "VIDEO",
-    numHands: 2
+    numHands: 2,
+    minHandDetectionConfidence: 0.65, // 誤検出を減らす
+    minTrackingConfidence: 0.65      // トラッキング安定化
   });
 
   return handLandmarker;
