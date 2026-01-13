@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hand Magic Studio ✨</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- 背景ビデオ（カメラ映像） -->
+    <video id="webcam" autoplay playsinline muted></video>
+    <div id="video-overlay"></div>
+    
+    <!-- 2D描画キャンバス（MediaPipeの骨格を直接描画） -->
+    <canvas id="hand-canvas"></canvas>
+    
+    <!-- 3Dキャンバス -->
+    <canvas id="three-canvas"></canvas>
+    
+    <!-- 最小限のUI -->
+    <div id="ui-overlay">
+        <!-- スタートボタン -->
+        <div id="start-container" class="start-container">
+            <button id="start-btn" class="start-btn">
+                <span class="btn-text">Start</span>
+            </button>
+        </div>
+        
+        <!-- ランドマーク表示トグル -->
+        <div class="toggle-container">
+            <span class="toggle-label">ランドマーク</span>
+            <label class="toggle-switch">
+                <input type="checkbox" id="landmark-toggle">
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+    </div>
+    
+    <!-- ローディング画面 -->
+    <div id="loading-screen" class="loading-screen">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <p class="loading-text">Loading Magic...</p>
+        </div>
+    </div>
+
+    <!-- Three.js -->
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    
+    <!-- アプリケーション -->
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
