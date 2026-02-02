@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hand Grid Controller ✋</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- 背景ビデオ（カメラ映像） -->
+    <video id="webcam" autoplay playsinline muted></video>
+    <div id="video-overlay"></div>
+    
+    <!-- 掴んだオブジェクトを手に追従表示するレイヤー -->
+    <div id="object-drag-layer"></div>
+
+    <!-- 9分割グリッド -->
+    <div id="grid-container">
+        <div class="grid-cell" data-index="0"></div>
+        <div class="grid-cell" data-index="1"></div>
+        <div class="grid-cell" data-index="2"></div>
+        <div class="grid-cell" data-index="3"></div>
+        <div class="grid-cell" data-index="4"></div>
+        <div class="grid-cell" data-index="5"></div>
+        <div class="grid-cell" data-index="6"></div>
+        <div class="grid-cell" data-index="7"></div>
+        <div class="grid-cell" data-index="8"></div>
+    </div>
+    
+    <!-- 2D手描画キャンバス -->
+    <canvas id="hand-canvas"></canvas>
+    
+    <!-- UI -->
+    <div id="ui-overlay">
+        <!-- スタートボタン -->
+        <div id="start-container" class="start-container">
+            <button id="start-btn" class="start-btn">
+                <span class="btn-text">Start</span>
+            </button>
+        </div>
+        
+        <!-- ランドマーク表示トグル -->
+        <div class="toggle-container">
+            <span class="toggle-label">ランドマーク</span>
+            <label class="toggle-switch">
+                <input type="checkbox" id="landmark-toggle">
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+    </div>
+    
+    <!-- ローディング画面 -->
+    <div id="loading-screen" class="loading-screen">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <p class="loading-text">Loading...</p>
+        </div>
+    </div>
+
+    <!-- アプリケーション -->
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
