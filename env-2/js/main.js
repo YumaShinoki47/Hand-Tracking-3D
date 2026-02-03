@@ -17,6 +17,9 @@ class HandGridController {
         this.loadingScreen = document.getElementById('loading-screen');
         this.gridCells = document.querySelectorAll('.grid-cell');
         this.objectDragLayer = document.getElementById('object-drag-layer');
+        this.protocolInstruction = document.getElementById('protocol-instruction');
+        this.protocolClear = document.getElementById('protocol-clear');
+        this.protocolFailed = document.getElementById('protocol-failed');
         
         // 2D手描画
         this.handCanvas = document.getElementById('hand-canvas');
@@ -31,6 +34,8 @@ class HandGridController {
         this.cellObjects = {};
         /** @type {Object.<number, { element: HTMLElement, fromCellIndex: number, grabAngle: number, isBack: boolean }>} 手インデックス → 掴んでいるオブジェクト */
         this.heldObjects = {};
+        /** 実験プロトコル状態 */
+        this.protocolState = 'Phase1_Step1';
         
         // モジュール
         this.handTracker = null;
@@ -81,13 +86,23 @@ class HandGridController {
             await this.handTracker.startWebcam();
             this.isRunning = true;
             this.startContainer.classList.add('hidden');
+            document.body.classList.remove('before-start');
+            
+            const experimentToggle = document.getElementById('experiment-mode-toggle');
+            this.protocolEnabled = experimentToggle ? experimentToggle.checked : true;
             
             // 2Dキャンバスのサイズを設定
             this.handCanvas.width = window.innerWidth;
             this.handCanvas.height = window.innerHeight;
             
-            // マス内に四角オブジェクトを配置（セル0とセル4に1つずつ）
-            this.createGridObjects([0, 4]);
+            // マス内に四角オブジェクトを配置（セル6,7,8に1つずつ・実験プロトコル用）
+            this.createGridObjects([6, 7, 8]);
+            if (this.protocolEnabled) {
+                this.protocolState = 'Phase1_Step1';
+                this.updateProtocolUI();
+            }
+            if (this.protocolClear) this.protocolClear.classList.add('hidden');
+            if (this.protocolFailed) this.protocolFailed.classList.add('hidden');
             
             this.animate();
         } catch (error) {
@@ -124,6 +139,92 @@ class HandGridController {
                     this.updateHeldObjectFlip(handIndex, hands[handIndex]);
                 }
             });
+        }
+        
+        if (this.protocolEnabled && this.protocolState !== 'PhaseDone' && this.protocolState !== 'PhaseFailed') {
+            this.checkProtocolStep();
+        }
+        this.updateProtocolUI();
+    }
+    
+    /**
+     * オブジェクトが現在どのマスにいるかを返す。掴んでいる場合は -1。
+     * @param {HTMLElement} element - オブジェクトの wrapper 要素
+     * @returns {number} セルインデックス (0-8) または -1
+     */
+    getCellOfObject(element) {
+        for (let cellIndex = 0; cellIndex < 9; cellIndex++) {
+            const arr = this.cellObjects[cellIndex];
+            if (arr && arr.includes(element)) return cellIndex;
+        }
+        return -1;
+    }
+    
+    /**
+     * 現在ステップで期待される移動を返す。PhaseDone / PhaseFailed のときは null。
+     * @returns {{ initialCell: number, targetCell: number } | null}
+     */
+    getExpectedMoveForCurrentStep() {
+        const transitions = {
+            Phase1_Step1: { initialCell: 6, targetCell: 3 },
+            Phase1_Step2: { initialCell: 7, targetCell: 4 },
+            Phase1_Step3: { initialCell: 8, targetCell: 5 },
+            Phase2_Step1: { initialCell: 6, targetCell: 6 },
+            Phase2_Step2: { initialCell: 7, targetCell: 7 },
+            Phase2_Step3: { initialCell: 8, targetCell: 8 }
+        };
+        return transitions[this.protocolState] || null;
+    }
+
+    /**
+     * 実験プロトコル: 現在ステップの条件を満たしていれば次へ進める
+     */
+    checkProtocolStep() {
+        const cfg = this.getExpectedMoveForCurrentStep();
+        if (!cfg) return;
+        for (let ci = 0; ci < 9; ci++) {
+            const arr = this.cellObjects[ci] || [];
+            for (const el of arr) {
+                const initial = parseInt(el.dataset.initialCell, 10);
+                if (initial !== cfg.initialCell) continue;
+                const current = this.getCellOfObject(el);
+                if (current === cfg.targetCell) {
+                    const next = {
+                        Phase1_Step1: 'Phase1_Step2',
+                        Phase1_Step2: 'Phase1_Step3',
+                        Phase1_Step3: 'Phase2_Step1',
+                        Phase2_Step1: 'Phase2_Step2',
+                        Phase2_Step2: 'Phase2_Step3',
+                        Phase2_Step3: 'PhaseDone'
+                    }[this.protocolState];
+                    this.protocolState = next;
+                    if (next === 'PhaseDone' && this.protocolClear) {
+                        this.protocolClear.classList.remove('hidden');
+                    }
+                    return; // 1ステップだけ進める
+                }
+            }
+        }
+    }
+    
+    /** プロトコル指示テキストとクリア表示の更新 */
+    updateProtocolUI() {
+        if (!this.protocolEnabled) {
+            if (this.protocolInstruction) this.protocolInstruction.textContent = '';
+            return;
+        }
+        const labels = {
+            Phase1_Step1: '6 → 3 に移動',
+            Phase1_Step2: '7 → 4 に移動',
+            Phase1_Step3: '8 → 5 に移動',
+            Phase2_Step1: '3 → 6 に戻す',
+            Phase2_Step2: '4 → 7 に戻す',
+            Phase2_Step3: '5 → 8 に戻す',
+            PhaseDone: '',
+            PhaseFailed: ''
+        };
+        if (this.protocolInstruction) {
+            this.protocolInstruction.textContent = labels[this.protocolState] || '';
         }
     }
     
@@ -201,8 +302,9 @@ class HandGridController {
     /**
      * 指定したセルに表裏のある四角オブジェクトを配置
      * @param {number[]} cellIndices - オブジェクトを置くセルのインデックス
+     * @param {string} [frontImageUrl] - 表 face に表示する画像の URL（省略時はグラデーション）
      */
-    createGridObjects(cellIndices) {
+    createGridObjects(cellIndices, frontImageUrl) {
         cellIndices.forEach((cellIndex) => {
             const wrapper = document.createElement('div');
             wrapper.className = 'grid-object';
@@ -212,11 +314,17 @@ class HandGridController {
             inner.className = 'grid-object-inner';
             const front = document.createElement('div');
             front.className = 'grid-object-front';
+            if (frontImageUrl) {
+                front.style.backgroundImage = `url(${frontImageUrl})`;
+                front.style.backgroundSize = 'cover';
+                front.style.backgroundPosition = 'center';
+            }
             const back = document.createElement('div');
             back.className = 'grid-object-back';
             inner.appendChild(front);
             inner.appendChild(back);
             wrapper.appendChild(inner);
+            wrapper.dataset.initialCell = String(cellIndex);
             this.gridCells[cellIndex].appendChild(wrapper);
             this.cellObjects[cellIndex] = [wrapper];
         });
@@ -263,6 +371,16 @@ class HandGridController {
             // パー: この手で離す
             if (gesture.type === GESTURE_TYPES.OPEN) {
                 if (this.heldObjects[handIndex] && cellIndex >= 0 && cellIndex < 9) {
+                    // 違反判定: 実験モードON かつ PhaseDone/PhaseFailed でなければ、離しが正しいかチェック
+                    if (this.protocolEnabled && this.protocolState !== 'PhaseDone' && this.protocolState !== 'PhaseFailed') {
+                        const el = this.heldObjects[handIndex].element;
+                        const initialCell = parseInt(el.dataset.initialCell, 10);
+                        const expected = this.getExpectedMoveForCurrentStep();
+                        if (expected && (initialCell !== expected.initialCell || cellIndex !== expected.targetCell)) {
+                            this.protocolState = 'PhaseFailed';
+                            if (this.protocolFailed) this.protocolFailed.classList.remove('hidden');
+                        }
+                    }
                     this.dropObject(handIndex, cellIndex);
                 }
             }

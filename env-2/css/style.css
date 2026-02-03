@@ -136,6 +136,7 @@ body {
 }
 
 .grid-cell {
+    position: relative;
     border: 1px solid var(--grid-border);
     background: transparent;
     transition: background-color 0.15s ease, box-shadow 0.15s ease;
@@ -144,18 +145,30 @@ body {
     justify-content: center;
 }
 
+/* スタート前は box.png を非表示 */
+body.before-start .grid-cell-bg {
+    display: none !important;
+}
+
+/* 6・7・8マス用の固定背景（掴めない） */
+.grid-cell-bg {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-size: auto 100%;
+    background-repeat: no-repeat;
+    background-position: center;
+    pointer-events: none;
+    z-index: 0;
+}
+
 .grid-cell.active {
     background: var(--grid-active);
     box-shadow: inset 0 0 50px rgba(139, 92, 246, 0.3);
 }
 
-/* セルのインデックス表示（デバッグ用、非表示） */
-.grid-cell::after {
-    content: attr(data-index);
-    font-size: 2rem;
-    color: rgba(255, 255, 255, 0.1);
-    font-weight: bold;
-}
 
 /* 2D手描画キャンバス */
 #hand-canvas {
@@ -167,6 +180,83 @@ body {
     transform: scaleX(-1);
     z-index: 3;
     pointer-events: none;
+}
+
+/* マス番号オーバーレイ：最前面・各マス中央に固定 */
+#grid-numbers-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+    z-index: 5;
+    pointer-events: none;
+}
+
+#grid-numbers-overlay .grid-number {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 2rem;
+    font-weight: bold;
+    color: rgba(255, 255, 255, 0.15);
+}
+
+/* 実験プロトコル: 現在の指示（画面上部中央） */
+.protocol-instruction {
+    position: fixed;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 5;
+    pointer-events: none;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.1rem;
+    font-weight: bold;
+    color: rgba(255, 255, 255, 0.9);
+    text-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+}
+
+/* 実験プロトコル: クリア表示（画面中央） */
+.protocol-clear {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 20;
+    pointer-events: none;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 3rem;
+    font-weight: bold;
+    color: #fff;
+    text-shadow: 0 0 20px rgba(139, 92, 246, 0.8);
+}
+
+.protocol-clear.hidden {
+    display: none;
+}
+
+/* 実験プロトコル: 違反時表示（画面中央・赤系） */
+.protocol-failed {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 20;
+    pointer-events: none;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 3rem;
+    font-weight: bold;
+    color: #e11;
+    text-shadow: 0 0 20px rgba(200, 0, 0, 0.8);
+}
+
+.protocol-failed.hidden {
+    display: none;
 }
 
 /* UI オーバーレイ */
@@ -216,6 +306,15 @@ body {
 
 .start-btn:active {
     transform: scale(0.98);
+}
+
+/* スタート画面内のオプション（実験モードトグル） */
+.start-option {
+    margin-top: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
 }
 
 /* ランドマーク表示トグルスイッチ */

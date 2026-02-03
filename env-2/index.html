@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
 </head>
-<body>
+<body class="before-start">
     <!-- 背景ビデオ（カメラ映像） -->
     <video id="webcam" autoplay playsinline muted></video>
     <div id="video-overlay"></div>
@@ -25,13 +25,33 @@
         <div class="grid-cell" data-index="3"></div>
         <div class="grid-cell" data-index="4"></div>
         <div class="grid-cell" data-index="5"></div>
-        <div class="grid-cell" data-index="6"></div>
-        <div class="grid-cell" data-index="7"></div>
-        <div class="grid-cell" data-index="8"></div>
+        <div class="grid-cell" data-index="6"><div class="grid-cell-bg" style="background-image: url('image/box.png')"></div></div>
+        <div class="grid-cell" data-index="7"><div class="grid-cell-bg" style="background-image: url('image/box.png')"></div></div>
+        <div class="grid-cell" data-index="8"><div class="grid-cell-bg" style="background-image: url('image/box.png')"></div></div>
     </div>
     
     <!-- 2D手描画キャンバス -->
     <canvas id="hand-canvas"></canvas>
+
+    <!-- 実験プロトコル: 現在の指示 -->
+    <div id="protocol-instruction" class="protocol-instruction" aria-live="polite"></div>
+    <!-- 実験プロトコル: クリア表示（完了時のみ） -->
+    <div id="protocol-clear" class="protocol-clear hidden" aria-live="polite">クリア！</div>
+    <!-- 実験プロトコル: 違反時表示 -->
+    <div id="protocol-failed" class="protocol-failed hidden" aria-live="polite">失敗！</div>
+
+    <!-- マス番号オーバーレイ（最前面・中央固定） -->
+    <div id="grid-numbers-overlay" aria-hidden="true">
+        <span class="grid-number">0</span>
+        <span class="grid-number">1</span>
+        <span class="grid-number">2</span>
+        <span class="grid-number">3</span>
+        <span class="grid-number">4</span>
+        <span class="grid-number">5</span>
+        <span class="grid-number">6</span>
+        <span class="grid-number">7</span>
+        <span class="grid-number">8</span>
+    </div>
     
     <!-- UI -->
     <div id="ui-overlay">
@@ -40,6 +60,13 @@
             <button id="start-btn" class="start-btn">
                 <span class="btn-text">Start</span>
             </button>
+            <div class="start-option">
+                <span class="toggle-label">実験モード</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="experiment-mode-toggle" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
         </div>
         
         <!-- ランドマーク表示トグル -->
