@@ -308,13 +308,25 @@ body.before-start .grid-cell-bg {
     transform: scale(0.98);
 }
 
-/* スタート画面内のオプション（実験モードトグル） */
+/* スタート画面内のオプション（グリッドサイズ・実験モードトグル） */
 .start-option {
     margin-top: 20px;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 10px;
+}
+
+.grid-size-select {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.85rem;
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(0, 0, 0, 0.3);
+    color: var(--text-secondary);
+    cursor: pointer;
+    min-width: 80px;
 }
 
 /* ランドマーク表示トグルスイッチ */

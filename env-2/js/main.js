@@ -41,12 +41,17 @@ class HandGridController {
         this.handTracker = null;
         this.gestureRecognizer = new GestureRecognizer();
         
-        // グリッド設定（3x3）
+        // グリッド設定（Start 押下時に grid-size-select から読み取り）
         this.gridCols = 3;
         this.gridRows = 3;
         
         // 初期化
         this.init();
+    }
+    
+    /** 総セル数 */
+    get totalCells() {
+        return this.gridRows * this.gridCols;
     }
     
     async init() {
@@ -83,23 +88,34 @@ class HandGridController {
         if (!this.isInitialized) return;
         
         try {
+            // グリッドサイズをスタートメニューから取得（3〜10にクランプ）
+            const sizeSelect = document.getElementById('grid-size-select');
+            const n = Math.min(10, Math.max(3, parseInt(sizeSelect ? sizeSelect.value : '3', 10) || 3));
+            this.gridCols = n;
+            this.gridRows = n;
+            
+            this.buildGridDOM();
+            
             await this.handTracker.startWebcam();
             this.isRunning = true;
             this.startContainer.classList.add('hidden');
             document.body.classList.remove('before-start');
             
             const experimentToggle = document.getElementById('experiment-mode-toggle');
-            this.protocolEnabled = experimentToggle ? experimentToggle.checked : true;
+            const is3x3 = this.gridRows === 3 && this.gridCols === 3;
+            this.protocolEnabled = is3x3 && (experimentToggle ? experimentToggle.checked : true);
             
             // 2Dキャンバスのサイズを設定
             this.handCanvas.width = window.innerWidth;
             this.handCanvas.height = window.innerHeight;
             
-            // マス内に四角オブジェクトを配置（セル6,7,8に1つずつ・実験プロトコル用）
-            this.createGridObjects([6, 7, 8]);
-            if (this.protocolEnabled) {
-                this.protocolState = 'Phase1_Step1';
-                this.updateProtocolUI();
+            // 3×3 のときのみ実験プロトコル用オブジェクトを配置
+            if (is3x3) {
+                this.createGridObjects([6, 7, 8]);
+                if (this.protocolEnabled) {
+                    this.protocolState = 'Phase1_Step1';
+                    this.updateProtocolUI();
+                }
             }
             if (this.protocolClear) this.protocolClear.classList.add('hidden');
             if (this.protocolFailed) this.protocolFailed.classList.add('hidden');
@@ -108,6 +124,46 @@ class HandGridController {
         } catch (error) {
             console.error('Failed to start:', error);
         }
+    }
+    
+    /** 選択された gridRows×gridCols で #grid-container と #grid-numbers-overlay を再構築 */
+    buildGridDOM() {
+        const gridContainer = document.getElementById('grid-container');
+        const numbersOverlay = document.getElementById('grid-numbers-overlay');
+        if (!gridContainer || !numbersOverlay) return;
+        
+        const total = this.totalCells;
+        const is3x3 = this.gridRows === 3 && this.gridCols === 3;
+        
+        gridContainer.innerHTML = '';
+        gridContainer.style.gridTemplateColumns = `repeat(${this.gridCols}, 1fr)`;
+        gridContainer.style.gridTemplateRows = `repeat(${this.gridRows}, 1fr)`;
+        
+        for (let i = 0; i < total; i++) {
+            const cell = document.createElement('div');
+            cell.className = 'grid-cell';
+            cell.dataset.index = String(i);
+            if (is3x3 && (i === 6 || i === 7 || i === 8)) {
+                const bg = document.createElement('div');
+                bg.className = 'grid-cell-bg';
+                bg.style.backgroundImage = "url('image/box.png')";
+                cell.appendChild(bg);
+            }
+            gridContainer.appendChild(cell);
+        }
+        
+        numbersOverlay.innerHTML = '';
+        numbersOverlay.style.gridTemplateColumns = `repeat(${this.gridCols}, 1fr)`;
+        numbersOverlay.style.gridTemplateRows = `repeat(${this.gridRows}, 1fr)`;
+        for (let i = 0; i < total; i++) {
+            const span = document.createElement('span');
+            span.className = 'grid-number';
+            span.textContent = String(i);
+            numbersOverlay.appendChild(span);
+        }
+        
+        this.gridCells = document.querySelectorAll('.grid-cell');
+        this.cellObjects = {};
     }
     
     animate() {
@@ -150,10 +206,10 @@ class HandGridController {
     /**
      * オブジェクトが現在どのマスにいるかを返す。掴んでいる場合は -1。
      * @param {HTMLElement} element - オブジェクトの wrapper 要素
-     * @returns {number} セルインデックス (0-8) または -1
+     * @returns {number} セルインデックス (0 〜 totalCells-1) または -1
      */
     getCellOfObject(element) {
-        for (let cellIndex = 0; cellIndex < 9; cellIndex++) {
+        for (let cellIndex = 0; cellIndex < this.totalCells; cellIndex++) {
             const arr = this.cellObjects[cellIndex];
             if (arr && arr.includes(element)) return cellIndex;
         }
@@ -182,7 +238,7 @@ class HandGridController {
     checkProtocolStep() {
         const cfg = this.getExpectedMoveForCurrentStep();
         if (!cfg) return;
-        for (let ci = 0; ci < 9; ci++) {
+        for (let ci = 0; ci < this.totalCells; ci++) {
             const arr = this.cellObjects[ci] || [];
             for (const el of arr) {
                 const initial = parseInt(el.dataset.initialCell, 10);
@@ -357,7 +413,7 @@ class HandGridController {
             if (this.showLandmarks) {
                 this.drawHandLandmarks(landmarks, palmCenter);
             }
-            if (cellIndex >= 0 && cellIndex < 9) {
+            if (cellIndex >= 0 && cellIndex < this.totalCells) {
                 this.gridCells[cellIndex].classList.add('active');
             }
 
@@ -370,7 +426,7 @@ class HandGridController {
             }
             // パー: この手で離す
             if (gesture.type === GESTURE_TYPES.OPEN) {
-                if (this.heldObjects[handIndex] && cellIndex >= 0 && cellIndex < 9) {
+                if (this.heldObjects[handIndex] && cellIndex >= 0 && cellIndex < this.totalCells) {
                     // 違反判定: 実験モードON かつ PhaseDone/PhaseFailed でなければ、離しが正しいかチェック
                     if (this.protocolEnabled && this.protocolState !== 'PhaseDone' && this.protocolState !== 'PhaseFailed') {
                         const el = this.heldObjects[handIndex].element;
@@ -432,7 +488,7 @@ class HandGridController {
      * 正規化座標からグリッドセルのインデックスを取得
      * @param {number} x - 正規化X座標 (0-1)
      * @param {number} y - 正規化Y座標 (0-1)
-     * @returns {number} セルインデックス (0-8)
+     * @returns {number} セルインデックス (0 〜 totalCells-1)、範囲外は -1
      */
     getCellIndex(x, y) {
         // 左右反転を考慮（カメラは反転表示）
@@ -447,7 +503,7 @@ class HandGridController {
             return -1;
         }
         
-        // インデックスを計算（左上が0、右下が8）
+        // インデックスを計算（左上が0、右下が totalCells-1）
         return row * this.gridCols + col;
     }
     
