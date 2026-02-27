@@ -7,7 +7,8 @@
 import { HandTracker } from './handTracking.js';
 import { GestureRecognizer, GESTURE_TYPES } from './gestures.js';
 
-const OBJECT_SIZE = 280; // 四角オブジェクトのサイズ（px）
+/** オブジェクトがセル内に収まる最大サイズの割合（0〜1） */
+const OBJECT_CELL_RATIO = 0.88;
 
 class HandGridController {
     constructor() {
@@ -52,6 +53,27 @@ class HandGridController {
     /** 総セル数 */
     get totalCells() {
         return this.gridRows * this.gridCols;
+    }
+
+    /** 左上の角のセルインデックス（常に 0: row=0, col=0） */
+    getTopLeftCellIndex() {
+        return 0;
+    }
+
+    /** 左下の角のセルインデックス（row=最下段, col=0） */
+    getBottomLeftCellIndex() {
+        return (this.gridRows - 1) * this.gridCols;
+    }
+
+    /**
+     * グリッドのセルサイズに合わせたオブジェクトの1辺の長さ（px）。
+     * セルより少し小さくしてはみ出しを防ぐ。
+     */
+    getObjectSize() {
+        const cellW = window.innerWidth / this.gridCols;
+        const cellH = window.innerHeight / this.gridRows;
+        const size = Math.min(cellW, cellH) * OBJECT_CELL_RATIO;
+        return Math.max(24, Math.floor(size)); // 最小24px
     }
     
     async init() {
@@ -102,20 +124,17 @@ class HandGridController {
             document.body.classList.remove('before-start');
             
             const experimentToggle = document.getElementById('experiment-mode-toggle');
-            const is3x3 = this.gridRows === 3 && this.gridCols === 3;
-            this.protocolEnabled = is3x3 && (experimentToggle ? experimentToggle.checked : true);
+            this.protocolEnabled = experimentToggle ? experimentToggle.checked : true;
             
             // 2Dキャンバスのサイズを設定
             this.handCanvas.width = window.innerWidth;
             this.handCanvas.height = window.innerHeight;
             
-            // 3×3 のときのみ実験プロトコル用オブジェクトを配置
-            if (is3x3) {
-                this.createGridObjects([6, 7, 8]);
-                if (this.protocolEnabled) {
-                    this.protocolState = 'Phase1_Step1';
-                    this.updateProtocolUI();
-                }
+            // 実験プロトコル ON のとき、左下の角にオブジェクトを1つ配置（全グリッドサイズ対応）
+            if (this.protocolEnabled) {
+                this.createGridObjects([this.getBottomLeftCellIndex()]);
+                this.protocolState = 'Phase1_Step1';
+                this.updateProtocolUI();
             }
             if (this.protocolClear) this.protocolClear.classList.add('hidden');
             if (this.protocolFailed) this.protocolFailed.classList.add('hidden');
@@ -133,7 +152,7 @@ class HandGridController {
         if (!gridContainer || !numbersOverlay) return;
         
         const total = this.totalCells;
-        const is3x3 = this.gridRows === 3 && this.gridCols === 3;
+        const bottomLeftIndex = (this.gridRows - 1) * this.gridCols;
         
         gridContainer.innerHTML = '';
         gridContainer.style.gridTemplateColumns = `repeat(${this.gridCols}, 1fr)`;
@@ -143,7 +162,7 @@ class HandGridController {
             const cell = document.createElement('div');
             cell.className = 'grid-cell';
             cell.dataset.index = String(i);
-            if (is3x3 && (i === 6 || i === 7 || i === 8)) {
+            if (i === bottomLeftIndex) {
                 const bg = document.createElement('div');
                 bg.className = 'grid-cell-bg';
                 bg.style.backgroundImage = "url('image/box.png')";
@@ -177,8 +196,16 @@ class HandGridController {
         // 全てのグリッドセルを非アクティブに
         this.gridCells.forEach(cell => cell.classList.remove('active'));
         
-        // 手のトラッキング
+        // 手のトラッキング（Holistic で手＋ポーズを同時取得）
         const hands = this.handTracker.detectHands();
+
+        // ランドマーク表示時: 全身ポーズを先に描画し、その上に手を描画
+        if (this.showLandmarks) {
+            const poseLandmarks = this.handTracker.getPoseLandmarks();
+            if (poseLandmarks && poseLandmarks.length >= 33) {
+                this.drawPoseLandmarks(poseLandmarks);
+            }
+        }
 
         if (hands && hands.length > 0) {
             this.processHands(hands);
@@ -218,22 +245,19 @@ class HandGridController {
     
     /**
      * 現在ステップで期待される移動を返す。PhaseDone / PhaseFailed のときは null。
+     * プロトコル: 左下 → 左上（全グリッドサイズ共通）。
      * @returns {{ initialCell: number, targetCell: number } | null}
      */
     getExpectedMoveForCurrentStep() {
-        const transitions = {
-            Phase1_Step1: { initialCell: 6, targetCell: 3 },
-            Phase1_Step2: { initialCell: 7, targetCell: 4 },
-            Phase1_Step3: { initialCell: 8, targetCell: 5 },
-            Phase2_Step1: { initialCell: 6, targetCell: 6 },
-            Phase2_Step2: { initialCell: 7, targetCell: 7 },
-            Phase2_Step3: { initialCell: 8, targetCell: 8 }
+        if (this.protocolState !== 'Phase1_Step1') return null;
+        return {
+            initialCell: this.getBottomLeftCellIndex(),
+            targetCell: this.getTopLeftCellIndex()
         };
-        return transitions[this.protocolState] || null;
     }
 
     /**
-     * 実験プロトコル: 現在ステップの条件を満たしていれば次へ進める
+     * 実験プロトコル: 現在ステップの条件を満たしていれば次へ進める（左下→左上で PhaseDone）
      */
     checkProtocolStep() {
         const cfg = this.getExpectedMoveForCurrentStep();
@@ -245,19 +269,9 @@ class HandGridController {
                 if (initial !== cfg.initialCell) continue;
                 const current = this.getCellOfObject(el);
                 if (current === cfg.targetCell) {
-                    const next = {
-                        Phase1_Step1: 'Phase1_Step2',
-                        Phase1_Step2: 'Phase1_Step3',
-                        Phase1_Step3: 'Phase2_Step1',
-                        Phase2_Step1: 'Phase2_Step2',
-                        Phase2_Step2: 'Phase2_Step3',
-                        Phase2_Step3: 'PhaseDone'
-                    }[this.protocolState];
-                    this.protocolState = next;
-                    if (next === 'PhaseDone' && this.protocolClear) {
-                        this.protocolClear.classList.remove('hidden');
-                    }
-                    return; // 1ステップだけ進める
+                    this.protocolState = 'PhaseDone';
+                    if (this.protocolClear) this.protocolClear.classList.remove('hidden');
+                    return;
                 }
             }
         }
@@ -270,12 +284,7 @@ class HandGridController {
             return;
         }
         const labels = {
-            Phase1_Step1: '6 → 3 に移動',
-            Phase1_Step2: '7 → 4 に移動',
-            Phase1_Step3: '8 → 5 に移動',
-            Phase2_Step1: '3 → 6 に戻す',
-            Phase2_Step2: '4 → 7 に戻す',
-            Phase2_Step3: '5 → 8 に戻す',
+            Phase1_Step1: '左下 → 左上 に移動',
             PhaseDone: '',
             PhaseFailed: ''
         };
@@ -361,11 +370,12 @@ class HandGridController {
      * @param {string} [frontImageUrl] - 表 face に表示する画像の URL（省略時はグラデーション）
      */
     createGridObjects(cellIndices, frontImageUrl) {
+        const size = this.getObjectSize();
         cellIndices.forEach((cellIndex) => {
             const wrapper = document.createElement('div');
             wrapper.className = 'grid-object';
-            wrapper.style.width = OBJECT_SIZE + 'px';
-            wrapper.style.height = OBJECT_SIZE + 'px';
+            wrapper.style.width = size + 'px';
+            wrapper.style.height = size + 'px';
             const inner = document.createElement('div');
             inner.className = 'grid-object-inner';
             const front = document.createElement('div');
@@ -395,9 +405,10 @@ class HandGridController {
         if (!element) return;
         const w = window.innerWidth;
         const h = window.innerHeight;
+        const size = element.offsetWidth || this.getObjectSize();
         const flippedX = 1 - palmCenter.x;
-        const left = flippedX * w - OBJECT_SIZE / 2;
-        const top = palmCenter.y * h - OBJECT_SIZE / 2;
+        const left = flippedX * w - size / 2;
+        const top = palmCenter.y * h - size / 2;
         element.style.left = left + 'px';
         element.style.top = top + 'px';
     }
@@ -583,6 +594,56 @@ class HandGridController {
             ctx.lineTo(cx, cy + 20);
             ctx.stroke();
         }
+    }
+
+    /**
+     * MediaPipe 全身ポーズランドマーク（33点）を2Dキャンバスに描画
+     * @param {Array} landmarks - poseLandmarks（正規化座標 x, y, z）
+     */
+    drawPoseLandmarks(landmarks) {
+        const ctx = this.handCtx;
+        const w = this.handCanvas.width;
+        const h = this.handCanvas.height;
+
+        // MediaPipe Pose 33点の接続（骨格線）
+        const POSE_CONNECTIONS = [
+            [0, 1], [1, 2], [2, 3], [3, 7],   // 左目〜左耳
+            [0, 4], [4, 5], [5, 6], [6, 8],   // 右目〜右耳
+            [9, 10],                            // 口
+            [11, 12],                           // 肩
+            [11, 13], [13, 15], [15, 17], [15, 19], [15, 21],  // 左腕〜左手
+            [12, 14], [14, 16], [16, 18], [16, 20], [16, 22],  // 右腕〜右手
+            [11, 23], [12, 24], [23, 24],      // 胴体
+            [23, 25], [25, 27], [27, 29], [27, 31],  // 左足
+            [24, 26], [26, 28], [28, 30], [28, 32]   // 右足
+        ];
+
+        // 骨格線を描画
+        ctx.strokeStyle = 'rgba(34, 197, 94, 0.9)';
+        ctx.lineWidth = 2;
+        POSE_CONNECTIONS.forEach(([start, end]) => {
+            const p1 = landmarks[start];
+            const p2 = landmarks[end];
+            if (!p1 || !p2) return;
+            ctx.beginPath();
+            ctx.moveTo(p1.x * w, p1.y * h);
+            ctx.lineTo(p2.x * w, p2.y * h);
+            ctx.stroke();
+        });
+
+        // 各関節を描画
+        landmarks.forEach((lm, idx) => {
+            const x = lm.x * w;
+            const y = lm.y * h;
+            let color = '#22c55e';
+            if (idx <= 10) color = '#a78bfa';   // 顔
+            else if (idx <= 22) color = '#38bdf8'; // 腕・肩
+            else color = '#f59e0b';              // 脚
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(x, y, 4, 0, Math.PI * 2);
+            ctx.fill();
+        });
     }
     
     hideLoadingScreen() {

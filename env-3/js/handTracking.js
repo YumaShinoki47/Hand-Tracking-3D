@@ -117,14 +117,13 @@ export class HandTracker {
                 performance.now()
             );
 
-            this.lastPoseResult = result.poseLandmarks && result.poseLandmarks.length > 0
-                ? result.poseLandmarks
-                : null;
-            if (result.poseWorldLandmarks && result.poseWorldLandmarks.length > 0) {
-                this.lastPoseWorldResult = result.poseWorldLandmarks;
-            } else {
-                this.lastPoseWorldResult = null;
-            }
+            // Holistic の poseLandmarks は「人数分の配列」→ 先頭人物の33点を格納
+            const poseList = result.poseLandmarks;
+            const firstPose = poseList?.[0];
+            this.lastPoseResult = (firstPose && firstPose.length >= 33) ? firstPose : null;
+            const worldList = result.poseWorldLandmarks;
+            const firstWorld = worldList?.[0];
+            this.lastPoseWorldResult = (firstWorld && firstWorld.length >= 33) ? firstWorld : null;
 
             const hands = [];
             // Holistic は leftHandLandmarks が「手の配列」なので先頭要素が21点
