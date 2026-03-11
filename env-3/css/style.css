@@ -16,6 +16,7 @@
     --text-secondary: rgba(255, 255, 255, 0.7);
     --grid-border: rgba(255, 255, 255, 0.15);
     --grid-active: rgba(139, 92, 246, 0.6);
+    --grid-arm-active: rgba(251, 191, 36, 0.55);
 }
 
 body {
@@ -135,6 +136,29 @@ body {
     pointer-events: none;
 }
 
+/* 3×3ブロック全体に box.png を固定表示（3×3のアスペクト比に合わせて引き延ばし） */
+.grid-cell-bg-3x3 {
+    position: absolute;
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    background-position: center;
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* cover.png 用コンテナ（box の上。掴むと3×3サイズのまま移動） */
+.cover-container {
+    z-index: 1;
+}
+
+.cover-element {
+    pointer-events: none;
+}
+
+.cover-element.held {
+    position: absolute;
+}
+
 .grid-cell {
     position: relative;
     border: 1px solid var(--grid-border);
@@ -145,8 +169,15 @@ body {
     justify-content: center;
 }
 
+/* スタート前はグリッド全体を非表示 */
+body.before-start #grid-container,
+body.before-start #grid-numbers-overlay {
+    display: none !important;
+}
+
 /* スタート前は box.png を非表示 */
-body.before-start .grid-cell-bg {
+body.before-start .grid-cell-bg,
+body.before-start .grid-cell-bg-3x3 {
     display: none !important;
 }
 
@@ -169,6 +200,17 @@ body.before-start .grid-cell-bg {
     box-shadow: inset 0 0 50px rgba(139, 92, 246, 0.3);
 }
 
+/* 肘〜手首の線分が通るマス（手と区別する色） */
+.grid-cell.arm-active {
+    background: var(--grid-arm-active);
+    box-shadow: inset 0 0 40px rgba(251, 191, 36, 0.25);
+}
+
+/* 手と腕の両方に反応するマスは青（手）優先 */
+.grid-cell.active.arm-active {
+    background: var(--grid-active);
+    box-shadow: inset 0 0 50px rgba(139, 92, 246, 0.3);
+}
 
 /* 2D手描画キャンバス */
 #hand-canvas {

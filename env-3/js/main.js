@@ -66,6 +66,20 @@ class HandGridController {
     }
 
     /**
+     * 右下の 3×3 ブロック（下3行・左から2〜4列目）の中央セルインデックスを返す。
+     * 10×10 のとき 82。N×N で N<3 のときは null。
+     * @returns {number|null}
+     */
+    getCenterCellIndexOf3x3Block() {
+        const N = this.gridCols;
+        if (N < 3) return null;
+        const colStart = N >= 4 ? 1 : 0;
+        const centerRow = N - 2;
+        const centerCol = colStart + 1;
+        return centerRow * N + centerCol;
+    }
+
+    /**
      * グリッドのセルサイズに合わせたオブジェクトの1辺の長さ（px）。
      * セルより少し小さくしてはみ出しを防ぐ。
      */
@@ -74,6 +88,85 @@ class HandGridController {
         const cellH = window.innerHeight / this.gridRows;
         const size = Math.min(cellW, cellH) * OBJECT_CELL_RATIO;
         return Math.max(24, Math.floor(size)); // 最小24px
+    }
+
+    /** 3×3ブロックの幅・高さ（px）。cover のサイズ維持用。 */
+    get3x3BlockSizePx() {
+        const N = this.gridCols;
+        return {
+            width: (window.innerWidth * 3) / N,
+            height: (window.innerHeight * 3) / this.gridRows
+        };
+    }
+
+    /** 指定セルが 3×3 ブロック（下3行・左から2〜4列目）に含まれるか */
+    isCellIn3x3Block(cellIndex) {
+        const N = this.gridCols;
+        if (N < 3) return false;
+        const rows = [N - 3, N - 2, N - 1];
+        const cols = N >= 4 ? [1, 2, 3] : [0, 1, 2];
+        const row = Math.floor(cellIndex / N);
+        const col = cellIndex % N;
+        return rows.includes(row) && cols.includes(col);
+    }
+
+    /**
+     * 指定セルの中心座標をピクセルで返す（表示の鏡像に合わせた座標系）
+     * @param {number} cellIndex
+     * @returns {{ x: number, y: number }}
+     */
+    getCellCenterPx(cellIndex) {
+        const row = Math.floor(cellIndex / this.gridCols);
+        const col = cellIndex % this.gridCols;
+        const x = (1 - (col + 0.5) / this.gridCols) * window.innerWidth;
+        const y = ((row + 0.5) / this.gridRows) * window.innerHeight;
+        return { x, y };
+    }
+
+    /**
+     * 画面座標 (clientX, clientY) が含まれるセルの (col, row) を返す（鏡像に合わせたグリッド）。
+     * @param {number} clientX
+     * @param {number} clientY
+     * @returns {{ col: number, row: number } | null} 範囲外なら null
+     */
+    getCellAtClient(clientX, clientY) {
+        const W = window.innerWidth;
+        const H = window.innerHeight;
+        // 鏡像: getCellCenterPx では col 0 = 画面右 (x≈W)。なので clientX が大きいほど col は小さい
+        const col = Math.max(0, Math.min(this.gridCols - 1, Math.floor((1 - clientX / W) * this.gridCols)));
+        const row = Math.floor((clientY / H) * this.gridRows);
+        if (row < 0 || row >= this.gridRows) return null;
+        return { col, row };
+    }
+
+    /**
+     * 3×3ブロックの左上の viewport 座標 (left, top) を返す。startCol/startRow は 0,3,6,... にスナップ済み想定。
+     * @param {number} startCol - 0, 3, 6, ...
+     * @param {number} startRow - 0, 3, 6, ...
+     * @returns {{ left: number, top: number }}
+     */
+    get3x3BlockLeftTopPx(startCol, startRow) {
+        const W = window.innerWidth;
+        const H = window.innerHeight;
+        const N = this.gridCols;
+        const R = this.gridRows;
+        const left = (1 - (startCol + 3) / N) * W;
+        const top = (startRow / R) * H;
+        return { left, top };
+    }
+
+    /**
+     * 手のひら中心（正規化 0–1）が cover コンテナの現在の矩形内にあるか
+     * @param {{ x: number, y: number }} palmCenter
+     * @returns {boolean}
+     */
+    isPalmOverCoverContainer(palmCenter) {
+        const container = document.getElementById('cover-container');
+        if (!container) return false;
+        const rect = container.getBoundingClientRect();
+        const clientX = (1 - palmCenter.x) * window.innerWidth;
+        const clientY = palmCenter.y * window.innerHeight;
+        return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
     }
     
     async init() {
@@ -152,22 +245,38 @@ class HandGridController {
         if (!gridContainer || !numbersOverlay) return;
         
         const total = this.totalCells;
-        const bottomLeftIndex = (this.gridRows - 1) * this.gridCols;
+        const N = this.gridCols;
         
         gridContainer.innerHTML = '';
-        gridContainer.style.gridTemplateColumns = `repeat(${this.gridCols}, 1fr)`;
+        gridContainer.style.gridTemplateColumns = `repeat(${N}, 1fr)`;
         gridContainer.style.gridTemplateRows = `repeat(${this.gridRows}, 1fr)`;
+        
+        // 3×3ブロック: box.png 固定 + cover.png 用コンテナ（掴むと3×3サイズのまま移動）
+        if (N >= 3) {
+            const colStart = N >= 4 ? 1 : 0;
+            const leftPct = (100 * colStart) / N;
+            const topPct = (100 * (N - 3)) / N;
+            const sizePct = (100 * 3) / N;
+            const boxOverlay = document.createElement('div');
+            boxOverlay.className = 'grid-cell-bg-3x3';
+            boxOverlay.style.cssText = `left:${leftPct}%;top:${topPct}%;width:${sizePct}%;height:${sizePct}%;background-image:url('image/box.png')`;
+            gridContainer.appendChild(boxOverlay);
+            const coverContainer = document.createElement('div');
+            coverContainer.id = 'cover-container';
+            coverContainer.className = 'grid-cell-bg-3x3 cover-container';
+            coverContainer.style.cssText = `left:${leftPct}%;top:${topPct}%;width:${sizePct}%;height:${sizePct}%`;
+            const coverEl = document.createElement('div');
+            coverEl.id = 'cover-element';
+            coverEl.className = 'cover-element';
+            coverEl.style.cssText = "width:100%;height:100%;background-image:url('image/cover.png');background-size:100% 100%;background-repeat:no-repeat;background-position:center";
+            coverContainer.appendChild(coverEl);
+            gridContainer.appendChild(coverContainer);
+        }
         
         for (let i = 0; i < total; i++) {
             const cell = document.createElement('div');
             cell.className = 'grid-cell';
             cell.dataset.index = String(i);
-            if (i === bottomLeftIndex) {
-                const bg = document.createElement('div');
-                bg.className = 'grid-cell-bg';
-                bg.style.backgroundImage = "url('image/box.png')";
-                cell.appendChild(bg);
-            }
             gridContainer.appendChild(cell);
         }
         
@@ -193,18 +302,36 @@ class HandGridController {
         // 2Dキャンバスをクリア
         this.handCtx.clearRect(0, 0, this.handCanvas.width, this.handCanvas.height);
         
-        // 全てのグリッドセルを非アクティブに
-        this.gridCells.forEach(cell => cell.classList.remove('active'));
-        
+        // 全てのグリッドセルを非アクティブに（手のひら・肘〜手首）
+        this.gridCells.forEach(cell => {
+            cell.classList.remove('active');
+            cell.classList.remove('arm-active');
+        });
+
         // 手のトラッキング（Holistic で手＋ポーズを同時取得）
         const hands = this.handTracker.detectHands();
+        const poseLandmarks = this.handTracker.getPoseLandmarks();
+
+        // 肘〜手首の線分が通るマスを腕用色でハイライト（MediaPipe Pose: 13=左肘,15=左手首, 14=右肘,16=右手首）
+        if (poseLandmarks && poseLandmarks.length >= 33) {
+            const leftCells = this.getCellsOnSegment(
+                poseLandmarks[13].x, poseLandmarks[13].y,
+                poseLandmarks[15].x, poseLandmarks[15].y
+            );
+            const rightCells = this.getCellsOnSegment(
+                poseLandmarks[14].x, poseLandmarks[14].y,
+                poseLandmarks[16].x, poseLandmarks[16].y
+            );
+            [...leftCells, ...rightCells].forEach((idx) => {
+                if (idx >= 0 && idx < this.totalCells && this.gridCells[idx]) {
+                    this.gridCells[idx].classList.add('arm-active');
+                }
+            });
+        }
 
         // ランドマーク表示時: 全身ポーズを先に描画し、その上に手を描画
-        if (this.showLandmarks) {
-            const poseLandmarks = this.handTracker.getPoseLandmarks();
-            if (poseLandmarks && poseLandmarks.length >= 33) {
-                this.drawPoseLandmarks(poseLandmarks);
-            }
+        if (this.showLandmarks && poseLandmarks && poseLandmarks.length >= 33) {
+            this.drawPoseLandmarks(poseLandmarks);
         }
 
         if (hands && hands.length > 0) {
@@ -215,11 +342,13 @@ class HandGridController {
         if (hands && Object.keys(this.heldObjects).length > 0) {
             Object.keys(this.heldObjects).forEach((key) => {
                 const handIndex = parseInt(key, 10);
+                const held = this.heldObjects[handIndex];
                 if (hands[handIndex]) {
                     const landmarks = hands[handIndex].landmarks;
                     const gesture = this.gestureRecognizer.recognize(landmarks, handIndex);
-                    this.updateHeldObjectPosition(this.heldObjects[handIndex].element, gesture.palmCenter);
-                    this.updateHeldObjectFlip(handIndex, hands[handIndex]);
+                    const size = held.isCover ? this.get3x3BlockSizePx() : undefined;
+                    this.updateHeldObjectPosition(held.element, gesture.palmCenter, size);
+                    if (!held.isCover) this.updateHeldObjectFlip(handIndex, hands[handIndex]);
                 }
             });
         }
@@ -397,18 +526,20 @@ class HandGridController {
     }
     
     /**
-     * 掴んでいるオブジェクトの表示位置を手のひらに合わせて更新
+     * 掴んでいるオブジェクトの表示位置を手のひらに合わせて更新（手の中心とオブジェクトの中心が重なる）
      * @param {HTMLElement} element - 対象のオブジェクト要素
      * @param {{ x: number, y: number }} palmCenter - 手のひらの正規化座標
+     * @param {{ width: number, height: number }} [explicitSize] - 指定時はその幅・高さで中央揃え（cover の 3×3 用）
      */
-    updateHeldObjectPosition(element, palmCenter) {
+    updateHeldObjectPosition(element, palmCenter, explicitSize) {
         if (!element) return;
         const w = window.innerWidth;
         const h = window.innerHeight;
-        const size = element.offsetWidth || this.getObjectSize();
+        const sizeW = explicitSize ? explicitSize.width : (element.offsetWidth || this.getObjectSize());
+        const sizeH = explicitSize ? explicitSize.height : (element.offsetHeight || this.getObjectSize());
         const flippedX = 1 - palmCenter.x;
-        const left = flippedX * w - size / 2;
-        const top = palmCenter.y * h - size / 2;
+        const left = flippedX * w - sizeW / 2;
+        const top = palmCenter.y * h - sizeH / 2;
         element.style.left = left + 'px';
         element.style.top = top + 'px';
     }
@@ -428,32 +559,98 @@ class HandGridController {
                 this.gridCells[cellIndex].classList.add('active');
             }
 
-            // グー: この手で掴む（この手がまだ何も持っていない & マスにオブジェクトが1つ以上ある）
+            // グー: 掴む（cover 優先: 3×3ブロック上なら cover を掴む。そうでなければマスのオブジェクト）
             if (gesture.type === GESTURE_TYPES.FIST) {
-                const arr = this.cellObjects[cellIndex];
-                if (!this.heldObjects[handIndex] && cellIndex >= 0 && arr && arr.length > 0) {
-                    this.grabObject(handIndex, cellIndex, palmCenter, hand);
-                }
-            }
-            // パー: この手で離す
-            if (gesture.type === GESTURE_TYPES.OPEN) {
-                if (this.heldObjects[handIndex] && cellIndex >= 0 && cellIndex < this.totalCells) {
-                    // 違反判定: 実験モードON かつ PhaseDone/PhaseFailed でなければ、離しが正しいかチェック
-                    if (this.protocolEnabled && this.protocolState !== 'PhaseDone' && this.protocolState !== 'PhaseFailed') {
-                        const el = this.heldObjects[handIndex].element;
-                        const initialCell = parseInt(el.dataset.initialCell, 10);
-                        const expected = this.getExpectedMoveForCurrentStep();
-                        if (expected && (initialCell !== expected.initialCell || cellIndex !== expected.targetCell)) {
-                            this.protocolState = 'PhaseFailed';
-                            if (this.protocolFailed) this.protocolFailed.classList.remove('hidden');
+                if (!this.heldObjects[handIndex]) {
+                    const coverEl = document.getElementById('cover-element');
+                    const coverContainer = document.getElementById('cover-container');
+                    const parentMatch = !!(coverEl && coverContainer && coverEl.parentElement === coverContainer);
+                    const palmOverCover = parentMatch && this.isPalmOverCoverContainer(palmCenter);
+                    const wouldGrabCover = !!(coverEl && coverContainer && palmOverCover);
+                    if (wouldGrabCover) {
+                        this.grabCover(handIndex, palmCenter);
+                    } else {
+                        const arr = this.cellObjects[cellIndex];
+                        if (cellIndex >= 0 && arr && arr.length > 0) {
+                            this.grabObject(handIndex, cellIndex, palmCenter, hand);
                         }
                     }
-                    this.dropObject(handIndex, cellIndex);
+                }
+            }
+            // パー: 離す
+            if (gesture.type === GESTURE_TYPES.OPEN) {
+                if (this.heldObjects[handIndex]) {
+                    if (this.heldObjects[handIndex].isCover) {
+                        this.dropCover(handIndex);
+                    } else if (cellIndex >= 0 && cellIndex < this.totalCells) {
+                        if (this.protocolEnabled && this.protocolState !== 'PhaseDone' && this.protocolState !== 'PhaseFailed') {
+                            const el = this.heldObjects[handIndex].element;
+                            const initialCell = parseInt(el.dataset.initialCell, 10);
+                            const expected = this.getExpectedMoveForCurrentStep();
+                            if (expected && (initialCell !== expected.initialCell || cellIndex !== expected.targetCell)) {
+                                this.protocolState = 'PhaseFailed';
+                                if (this.protocolFailed) this.protocolFailed.classList.remove('hidden');
+                            }
+                        }
+                        this.dropObject(handIndex, cellIndex);
+                    }
                 }
             }
         });
     }
     
+    /** cover.png を掴む（3×3サイズを維持したままドラッグレイヤーへ） */
+    grabCover(handIndex, palmCenter) {
+        const coverEl = document.getElementById('cover-element');
+        const coverContainer = document.getElementById('cover-container');
+        if (!coverEl || !coverContainer || coverEl.parentElement !== coverContainer) return;
+        const { width, height } = this.get3x3BlockSizePx();
+        coverEl.remove();
+        this.objectDragLayer.appendChild(coverEl);
+        coverEl.classList.add('held');
+        coverEl.style.width = width + 'px';
+        coverEl.style.height = height + 'px';
+        coverEl.style.left = '';
+        coverEl.style.top = '';
+        this.heldObjects[handIndex] = { element: coverEl, isCover: true };
+        this.updateHeldObjectPosition(coverEl, palmCenter, { width, height });
+    }
+
+    /**
+     * cover.png を離す。離した瞬間の cover の表示位置をそのまま使って配置（ワープ防止）。
+     * @param {number} handIndex
+     */
+    dropCover(handIndex) {
+        const held = this.heldObjects[handIndex];
+        if (!held || !held.isCover) return;
+        const coverEl = held.element;
+        const coverContainer = document.getElementById('cover-container');
+        if (!coverContainer) return;
+        const { width, height } = this.get3x3BlockSizePx();
+        const rect = coverEl.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        // 離したときの cover の中心が含まれるマスを求め、そのマスの中心に 3×3 の中心が来るように配置
+        const cell = this.getCellAtClient(centerX, centerY);
+        const cellIndex = cell != null ? cell.row * this.gridCols + cell.col : 0;
+        const cellCenter = this.getCellCenterPx(cellIndex);
+        const snapLeft = cellCenter.x - width / 2;
+        const snapTop = cellCenter.y - height / 2;
+        coverEl.classList.remove('held');
+        coverEl.style.width = '100%';
+        coverEl.style.height = '100%';
+        coverEl.style.left = '';
+        coverEl.style.top = '';
+        coverEl.remove();
+        coverContainer.appendChild(coverEl);
+        coverContainer.style.position = 'fixed';
+        coverContainer.style.left = snapLeft + 'px';
+        coverContainer.style.top = snapTop + 'px';
+        coverContainer.style.width = width + 'px';
+        coverContainer.style.height = height + 'px';
+        delete this.heldObjects[handIndex];
+    }
+
     /** 指定した手で指定セルのオブジェクトを1つ掴む。手の甲を向けるとオブジェクトが裏返る。 */
     grabObject(handIndex, cellIndex, palmCenter, hand) {
         const arr = this.cellObjects[cellIndex];
@@ -516,6 +713,27 @@ class HandGridController {
         
         // インデックスを計算（左上が0、右下が totalCells-1）
         return row * this.gridCols + col;
+    }
+
+    /**
+     * 正規化座標の線分が通るグリッドセルのインデックスを返す（肘〜手首の可視化用）。
+     * @param {number} x1 - 始点の正規化X (0-1)
+     * @param {number} y1 - 始点の正規化Y (0-1)
+     * @param {number} x2 - 終点の正規化X (0-1)
+     * @param {number} y2 - 終点の正規化Y (0-1)
+     * @returns {number[]} セルインデックスの配列（重複なし）
+     */
+    getCellsOnSegment(x1, y1, x2, y2) {
+        const indices = new Set();
+        const steps = 20;
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const x = x1 + (x2 - x1) * t;
+            const y = y1 + (y2 - y1) * t;
+            const idx = this.getCellIndex(x, y);
+            if (idx >= 0) indices.add(idx);
+        }
+        return [...indices];
     }
     
     /**
