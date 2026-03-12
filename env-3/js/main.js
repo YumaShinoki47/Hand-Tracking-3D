@@ -12,14 +12,17 @@ const OBJECT_CELL_RATIO = 0.88;
 
 /** コンタミネーションスコアの最大値（ゲージ100%対応） */
 const CONTAMINATION_MAX = 200;
-/** 蓋が開いているとき手がboxの上にある場合の加算（1フレームあたり） */
+/** 蓋が開いているとき手がboxの上にある場合の加算（1フレームあたり・1マス時） */
 const CONTAMINATION_RATE_PER_FRAME = 1;
+/** コンタミ加算の倍率：1マス=1倍、2マス=1.5倍、3マス=2倍… の増分（1マスあたり+0.5） */
+const CONTAMINATION_MULTIPLIER_PER_EXTRA_CELL = 0.5;
 
 class HandGridController {
     constructor() {
         // DOM要素
         this.startBtn = document.getElementById('start-btn');
         this.startContainer = document.getElementById('start-container');
+        this.backToStartBtn = document.getElementById('back-to-start-btn');
         this.loadingScreen = document.getElementById('loading-screen');
         this.gridCells = document.querySelectorAll('.grid-cell');
         this.objectDragLayer = document.getElementById('object-drag-layer');
@@ -226,6 +229,50 @@ class HandGridController {
     }
 
     /**
+     * box の 3×3 領域に含まれるグリッドのセルインデックス一覧
+     * @returns {Set<number>} N<3 のとき空の Set
+     */
+    getBoxCellIndices() {
+        const N = this.gridCols;
+        const R = this.gridRows;
+        if (N < 3) return new Set();
+        const colStart = N >= 4 ? 1 : 0;
+        const rowStart = R - 3;
+        const indices = new Set();
+        for (let row = rowStart; row < rowStart + 3 && row < R; row++) {
+            for (let col = colStart; col < colStart + 3 && col < N; col++) {
+                indices.add(row * N + col);
+            }
+        }
+        return indices;
+    }
+
+    /**
+     * 手のランドマークのいずれかが box の 3×3 領域内にあるか（active マスと同じ判定）
+     * @param {Array} landmarks - 手のランドマーク配列
+     * @returns {boolean}
+     */
+    isHandOverBox(landmarks) {
+        return this.countHandCellsInBox(landmarks) > 0;
+    }
+
+    /**
+     * 手のランドマークが box 内に存在するマス数（重複なし）
+     * @param {Array} landmarks - 手のランドマーク配列
+     * @returns {number}
+     */
+    countHandCellsInBox(landmarks) {
+        const boxCells = this.getBoxCellIndices();
+        if (!boxCells.size || !landmarks || !landmarks.length) return 0;
+        const handCellsInBox = new Set();
+        for (const lm of landmarks) {
+            const idx = this.getCellIndex(lm.x, lm.y);
+            if (idx >= 0 && boxCells.has(idx)) handCellsInBox.add(idx);
+        }
+        return handCellsInBox.size;
+    }
+
+    /**
      * 腕（肘〜手首）の線分が box の 3×3 領域と重なっているか。
      * @param {Array} poseLandmarks - MediaPipe Pose ランドマーク（13=左肘,15=左手首, 14=右肘,16=右手首）
      * @param {boolean} isLeftArm - true=左腕, false=右腕
@@ -263,6 +310,7 @@ class HandGridController {
 
             // イベントリスナー
             this.startBtn.addEventListener('click', () => this.start());
+            if (this.backToStartBtn) this.backToStartBtn.addEventListener('click', () => this.backToStart());
             window.addEventListener('resize', () => this.onResize());
 
             // ランドマーク表示トグル
@@ -272,6 +320,20 @@ class HandGridController {
                     this.handCtx.clearRect(0, 0, this.handCanvas.width, this.handCanvas.height);
                 }
             });
+
+            // マス番号表示トグル
+            const gridNumbersToggle = document.getElementById('grid-numbers-toggle');
+            const gridNumbersOverlay = document.getElementById('grid-numbers-overlay');
+            if (gridNumbersToggle && gridNumbersOverlay) {
+                gridNumbersToggle.addEventListener('change', (e) => {
+                    if (e.target.checked) {
+                        gridNumbersOverlay.classList.remove('hidden');
+                    } else {
+                        gridNumbersOverlay.classList.add('hidden');
+                    }
+                });
+                if (!gridNumbersToggle.checked) gridNumbersOverlay.classList.add('hidden');
+            }
 
             // 初期化完了
             this.isInitialized = true;
@@ -302,6 +364,7 @@ class HandGridController {
             await this.handTracker.startWebcam();
             this.isRunning = true;
             this.startContainer.classList.add('hidden');
+            if (this.backToStartBtn) this.backToStartBtn.classList.remove('hidden');
             document.body.classList.remove('before-start');
             
             const experimentToggle = document.getElementById('experiment-mode-toggle');
@@ -324,6 +387,20 @@ class HandGridController {
         } catch (error) {
             console.error('Failed to start:', error);
         }
+    }
+
+    /** スタート画面へ戻る（カメラ停止・UIをスタート前の状態に） */
+    backToStart() {
+        this.isRunning = false;
+        if (this.handTracker) this.handTracker.stopWebcam();
+        this.contaminationScore = 0;
+        const scoreEl = document.getElementById('contamination-score');
+        const gaugeBar = document.getElementById('contamination-gauge-bar');
+        if (scoreEl) scoreEl.textContent = '0';
+        if (gaugeBar) gaugeBar.style.width = '0%';
+        this.startContainer.classList.remove('hidden');
+        if (this.backToStartBtn) this.backToStartBtn.classList.add('hidden');
+        document.body.classList.add('before-start');
     }
     
     /** 選択された gridRows×gridCols で #grid-container と #grid-numbers-overlay を再構築 */
@@ -426,13 +503,14 @@ class HandGridController {
             this.processHands(hands);
         }
 
-        // 蓋が開いているとき、手のひらまたは腕（肘〜手首）が box の上にあればスコア加算
+        // 蓋が開いているとき、手のランドマークが存在するマス（active）または腕が box の上にあればスコア加算（マス数に応じて倍率）
         if (!this.isLidClosed()) {
             if (hands && hands.length > 0) {
                 for (let i = 0; i < hands.length; i++) {
-                    const gesture = this.gestureRecognizer.recognize(hands[i].landmarks, i);
-                    if (this.isPalmOverBox(gesture.palmCenter)) {
-                        this.contaminationScore += CONTAMINATION_RATE_PER_FRAME;
+                    const count = this.countHandCellsInBox(hands[i].landmarks);
+                    if (count > 0) {
+                        const multiplier = 1 + (count - 1) * CONTAMINATION_MULTIPLIER_PER_EXTRA_CELL;
+                        this.contaminationScore += CONTAMINATION_RATE_PER_FRAME * multiplier;
                     }
                 }
             }
@@ -668,9 +746,13 @@ class HandGridController {
             if (this.showLandmarks) {
                 this.drawHandLandmarks(landmarks, palmCenter);
             }
-            if (cellIndex >= 0 && cellIndex < this.totalCells) {
-                this.gridCells[cellIndex].classList.add('active');
+            // 手のランドマークが存在する全てのマスをアクティブ表示
+            const activeCellIndices = new Set();
+            for (const lm of landmarks) {
+                const idx = this.getCellIndex(lm.x, lm.y);
+                if (idx >= 0 && idx < this.totalCells) activeCellIndices.add(idx);
             }
+            activeCellIndices.forEach((idx) => this.gridCells[idx].classList.add('active'));
 
             // グー: 掴む（cover 優先: 3×3ブロック上なら cover を掴む。そうでなければマスのオブジェクト）
             if (gesture.type === GESTURE_TYPES.FIST) {

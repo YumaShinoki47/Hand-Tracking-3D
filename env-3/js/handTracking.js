@@ -91,6 +91,17 @@ export class HandTracker {
     }
 
     /**
+     * Webカメラを停止（スタートへ戻る用。dispose は呼ばないので再 startWebcam 可能）
+     */
+    stopWebcam() {
+        if (this.videoEl && this.videoEl.srcObject) {
+            this.videoEl.srcObject.getTracks().forEach(track => track.stop());
+            this.videoEl.srcObject = null;
+        }
+        this.isWebcamRunning = false;
+    }
+
+    /**
      * 手を検出（Holistic の left/right を既存アプリと同じ形式で返す）
      * @returns {Array|null} 検出された手の情報 [{ landmarks, worldLandmarks, handedness }, ...]
      */

@@ -64,6 +64,8 @@
     
     <!-- UI -->
     <div id="ui-overlay">
+        <!-- スタートへ戻る（ゲーム中のみ表示） -->
+        <button id="back-to-start-btn" class="back-to-start-btn hidden" type="button">スタートへ戻る</button>
         <!-- スタートボタン -->
         <div id="start-container" class="start-container">
             <button id="start-btn" class="start-btn">
@@ -91,13 +93,22 @@
             </div>
         </div>
         
-        <!-- ランドマーク表示トグル -->
+        <!-- 右下トグル群 -->
         <div class="toggle-container">
-            <span class="toggle-label">ランドマーク（手＋全身）</span>
-            <label class="toggle-switch">
-                <input type="checkbox" id="landmark-toggle">
-                <span class="toggle-slider"></span>
-            </label>
+            <div class="toggle-row">
+                <span class="toggle-label">ランドマーク（手＋全身）</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="landmark-toggle">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div class="toggle-row">
+                <span class="toggle-label">マス番号</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="grid-numbers-toggle">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
         </div>
     </div>
     
