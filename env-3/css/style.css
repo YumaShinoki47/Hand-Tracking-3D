@@ -437,6 +437,49 @@ body.before-start .grid-cell-bg-3x3 {
     background: white;
 }
 
+/* コンタミネーションスコア（画面左下） */
+#contamination-panel {
+    position: fixed;
+    left: 16px;
+    bottom: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    z-index: 100;
+    pointer-events: none;
+    font-family: 'Orbitron', sans-serif;
+}
+
+.contamination-label {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    letter-spacing: 1px;
+}
+
+.contamination-score {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+#contamination-gauge-wrap {
+    width: 160px;
+    height: 10px;
+    background: rgba(255, 255, 255, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+#contamination-gauge-bar {
+    height: 100%;
+    width: 0%;
+    max-width: 100%;
+    background: var(--primary);
+    border-radius: 4px;
+    transition: width 0.1s ease;
+}
+
 /* ローディング画面 */
 .loading-screen {
     position: fixed;

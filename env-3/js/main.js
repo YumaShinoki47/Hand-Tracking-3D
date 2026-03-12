@@ -10,6 +10,11 @@ import { GestureRecognizer, GESTURE_TYPES } from './gestures.js';
 /** オブジェクトがセル内に収まる最大サイズの割合（0〜1） */
 const OBJECT_CELL_RATIO = 0.88;
 
+/** コンタミネーションスコアの最大値（ゲージ100%対応） */
+const CONTAMINATION_MAX = 200;
+/** 蓋が開いているとき手がboxの上にある場合の加算（1フレームあたり） */
+const CONTAMINATION_RATE_PER_FRAME = 1;
+
 class HandGridController {
     constructor() {
         // DOM要素
@@ -37,6 +42,8 @@ class HandGridController {
         this.heldObjects = {};
         /** 実験プロトコル状態 */
         this.protocolState = 'Phase1_Step1';
+        /** コンタミネーションスコア（蓋が開いているときに手がboxの上にあると上昇） */
+        this.contaminationScore = 0;
         
         // モジュール
         this.handTracker = null;
@@ -168,6 +175,85 @@ class HandGridController {
         const clientY = palmCenter.y * window.innerHeight;
         return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
     }
+
+    /**
+     * box の 3×3 領域を viewport 座標（px）で返す。buildGridDOM の初期位置と同じ式。
+     * @returns {{ left: number, top: number, width: number, height: number } | null} N<3 のとき null
+     */
+    getBoxRectPx() {
+        const N = this.gridCols;
+        if (N < 3) return null;
+        const colStart = N >= 4 ? 1 : 0;
+        const leftPct = (100 * colStart) / N;
+        const topPct = (100 * (N - 3)) / N;
+        const sizePct = (100 * 3) / N;
+        const W = window.innerWidth;
+        const H = window.innerHeight;
+        return {
+            left: (leftPct / 100) * W,
+            top: (topPct / 100) * H,
+            width: (sizePct / 100) * W,
+            height: (sizePct / 100) * H
+        };
+    }
+
+    /** 蓋が閉じているか（cover が box とほぼ同じ位置にあるか） */
+    isLidClosed() {
+        const boxRect = this.getBoxRectPx();
+        const coverContainer = document.getElementById('cover-container');
+        if (!boxRect || !coverContainer) return false;
+        const coverRect = coverContainer.getBoundingClientRect();
+        const boxCenterX = boxRect.left + boxRect.width / 2;
+        const boxCenterY = boxRect.top + boxRect.height / 2;
+        const coverCenterX = coverRect.left + coverRect.width / 2;
+        const coverCenterY = coverRect.top + coverRect.height / 2;
+        const dist = Math.hypot(coverCenterX - boxCenterX, coverCenterY - boxCenterY);
+        return dist <= 15;
+    }
+
+    /**
+     * 手のひら中心が box の 3×3 領域内にあるか
+     * @param {{ x: number, y: number }} palmCenter
+     * @returns {boolean}
+     */
+    isPalmOverBox(palmCenter) {
+        const boxRect = this.getBoxRectPx();
+        if (!boxRect) return false;
+        const clientX = (1 - palmCenter.x) * window.innerWidth;
+        const clientY = palmCenter.y * window.innerHeight;
+        return clientX >= boxRect.left && clientX <= boxRect.left + boxRect.width &&
+            clientY >= boxRect.top && clientY <= boxRect.top + boxRect.height;
+    }
+
+    /**
+     * 腕（肘〜手首）の線分が box の 3×3 領域と重なっているか。
+     * @param {Array} poseLandmarks - MediaPipe Pose ランドマーク（13=左肘,15=左手首, 14=右肘,16=右手首）
+     * @param {boolean} isLeftArm - true=左腕, false=右腕
+     * @returns {boolean}
+     */
+    isArmSegmentOverBox(poseLandmarks, isLeftArm) {
+        const boxRect = this.getBoxRectPx();
+        if (!boxRect || !poseLandmarks || poseLandmarks.length < 33) return false;
+        const W = window.innerWidth;
+        const H = window.innerHeight;
+        const [iElbow, iWrist] = isLeftArm ? [13, 15] : [14, 16];
+        const nx1 = poseLandmarks[iElbow].x, ny1 = poseLandmarks[iElbow].y;
+        const nx2 = poseLandmarks[iWrist].x, ny2 = poseLandmarks[iWrist].y;
+        const x1 = (1 - nx1) * W, y1 = ny1 * H;
+        const x2 = (1 - nx2) * W, y2 = ny2 * H;
+        const left = boxRect.left, right = boxRect.left + boxRect.width;
+        const top = boxRect.top, bottom = boxRect.top + boxRect.height;
+        const inRect = (px, py) => px >= left && px <= right && py >= top && py <= bottom;
+        if (inRect(x1, y1) || inRect(x2, y2)) return true;
+        const steps = 24;
+        for (let i = 1; i < steps; i++) {
+            const t = i / steps;
+            const px = x1 + t * (x2 - x1);
+            const py = y1 + t * (y2 - y1);
+            if (inRect(px, py)) return true;
+        }
+        return false;
+    }
     
     async init() {
         try {
@@ -201,6 +287,8 @@ class HandGridController {
     
     async start() {
         if (!this.isInitialized) return;
+
+        this.contaminationScore = 0;
 
         try {
             // グリッドサイズをスタートメニューから取得（3〜10にクランプ）
@@ -336,6 +424,31 @@ class HandGridController {
 
         if (hands && hands.length > 0) {
             this.processHands(hands);
+        }
+
+        // 蓋が開いているとき、手のひらまたは腕（肘〜手首）が box の上にあればスコア加算
+        if (!this.isLidClosed()) {
+            if (hands && hands.length > 0) {
+                for (let i = 0; i < hands.length; i++) {
+                    const gesture = this.gestureRecognizer.recognize(hands[i].landmarks, i);
+                    if (this.isPalmOverBox(gesture.palmCenter)) {
+                        this.contaminationScore += CONTAMINATION_RATE_PER_FRAME;
+                    }
+                }
+            }
+            if (poseLandmarks && poseLandmarks.length >= 33) {
+                if (this.isArmSegmentOverBox(poseLandmarks, true)) this.contaminationScore += CONTAMINATION_RATE_PER_FRAME;
+                if (this.isArmSegmentOverBox(poseLandmarks, false)) this.contaminationScore += CONTAMINATION_RATE_PER_FRAME;
+            }
+        }
+
+        // コンタミネーション表示更新
+        const scoreEl = document.getElementById('contamination-score');
+        const gaugeBar = document.getElementById('contamination-gauge-bar');
+        if (scoreEl) scoreEl.textContent = String(Math.round(this.contaminationScore));
+        if (gaugeBar) {
+            const pct = Math.min(100, (Math.min(this.contaminationScore, CONTAMINATION_MAX) / CONTAMINATION_MAX) * 100);
+            gaugeBar.style.width = pct + '%';
         }
         
         // 掴んだオブジェクトをそれぞれの手の位置・裏表に追従
