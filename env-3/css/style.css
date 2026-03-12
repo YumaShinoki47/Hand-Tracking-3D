@@ -153,6 +153,28 @@ body {
 
 .cover-element {
     pointer-events: none;
+    transform-style: preserve-3d;
+    transition: transform 0.35s ease;
+    backface-visibility: hidden;
+}
+
+/* 裏面：単色でわかりやすく（表は background-image で表示） */
+.cover-element::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(145deg, #374151 0%, #1f2937 100%);
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-radius: 8px;
+    transform: rotateY(180deg);
+    backface-visibility: hidden;
+}
+
+.cover-element.flipped {
+    transform: rotateY(180deg);
 }
 
 .cover-element.held {

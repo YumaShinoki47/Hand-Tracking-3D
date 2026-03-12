@@ -76,14 +76,14 @@ class HandGridController {
     }
 
     /**
-     * 右下の 3×3 ブロック（下3行・左から2〜4列目）の中央セルインデックスを返す。
+     * 右下の 3×3 ブロック（下3行・左から3〜5列目、セル72,73,74,82,83,84,92,93,94）の中央セルインデックスを返す。
      * 10×10 のとき 82。N×N で N<3 のときは null。
      * @returns {number|null}
      */
     getCenterCellIndexOf3x3Block() {
         const N = this.gridCols;
         if (N < 3) return null;
-        const colStart = N >= 4 ? 1 : 0;
+        const colStart = N >= 4 ? 2 : 0;
         const centerRow = N - 2;
         const centerCol = colStart + 1;
         return centerRow * N + centerCol;
@@ -109,12 +109,12 @@ class HandGridController {
         };
     }
 
-    /** 指定セルが 3×3 ブロック（下3行・左から2〜4列目）に含まれるか */
+    /** 指定セルが 3×3 ブロック（下3行・左から3〜5列目、72,73,74,82,83,84,92,93,94）に含まれるか */
     isCellIn3x3Block(cellIndex) {
         const N = this.gridCols;
         if (N < 3) return false;
         const rows = [N - 3, N - 2, N - 1];
-        const cols = N >= 4 ? [1, 2, 3] : [0, 1, 2];
+        const cols = N >= 4 ? [2, 3, 4] : [0, 1, 2];
         const row = Math.floor(cellIndex / N);
         const col = cellIndex % N;
         return rows.includes(row) && cols.includes(col);
@@ -166,17 +166,25 @@ class HandGridController {
     }
 
     /**
-     * 手のひら中心（正規化 0–1）が cover コンテナの現在の矩形内にあるか
+     * 手のひら中心が載っている cover コンテナを返す（どちらにも載っていなければ null）
      * @param {{ x: number, y: number }} palmCenter
-     * @returns {boolean}
+     * @returns {HTMLElement | null}
      */
-    isPalmOverCoverContainer(palmCenter) {
-        const container = document.getElementById('cover-container');
-        if (!container) return false;
-        const rect = container.getBoundingClientRect();
+    getCoverContainerUnderPalm(palmCenter) {
         const clientX = (1 - palmCenter.x) * window.innerWidth;
         const clientY = palmCenter.y * window.innerHeight;
-        return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+        for (const id of ['cover-container', 'cover-container-2']) {
+            const container = document.getElementById(id);
+            if (!container) continue;
+            const rect = container.getBoundingClientRect();
+            if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) return container;
+        }
+        return null;
+    }
+
+    /** @deprecated 代わりに getCoverContainerUnderPalm を使用 */
+    isPalmOverCoverContainer(palmCenter) {
+        return this.getCoverContainerUnderPalm(palmCenter) !== null;
     }
 
     /**
@@ -186,7 +194,7 @@ class HandGridController {
     getBoxRectPx() {
         const N = this.gridCols;
         if (N < 3) return null;
-        const colStart = N >= 4 ? 1 : 0;
+        const colStart = N >= 4 ? 2 : 0;
         const leftPct = (100 * colStart) / N;
         const topPct = (100 * (N - 3)) / N;
         const sizePct = (100 * 3) / N;
@@ -200,18 +208,78 @@ class HandGridController {
         };
     }
 
-    /** 蓋が閉じているか（cover が box とほぼ同じ位置にあるか） */
-    isLidClosed() {
-        const boxRect = this.getBoxRectPx();
-        const coverContainer = document.getElementById('cover-container');
-        if (!boxRect || !coverContainer) return false;
+    /**
+     * 2つ目の box の 3×3 領域（セル75,76,77,85,86,87,95,96,97＝下3行・左から6〜8列目）を viewport px で返す。
+     * @returns {{ left: number, top: number, width: number, height: number } | null}
+     */
+    getBox2RectPx() {
+        const N = this.gridCols;
+        if (N < 3) return null;
+        const colStart = N >= 4 ? 5 : 0;
+        const leftPct = (100 * colStart) / N;
+        const topPct = (100 * (N - 3)) / N;
+        const sizePct = (100 * 3) / N;
+        const W = window.innerWidth;
+        const H = window.innerHeight;
+        return {
+            left: (leftPct / 100) * W,
+            top: (topPct / 100) * H,
+            width: (sizePct / 100) * W,
+            height: (sizePct / 100) * H
+        };
+    }
+
+    /** 2つ目の box のセルインデックス一覧（75,76,77,85,86,87,95,96,97） */
+    getBox2CellIndices() {
+        const N = this.gridCols;
+        const R = this.gridRows;
+        if (N < 3) return new Set();
+        const colStart = N >= 4 ? 5 : 0;
+        const rowStart = R - 3;
+        const indices = new Set();
+        for (let row = rowStart; row < rowStart + 3 && row < R; row++) {
+            for (let col = colStart; col < colStart + 3 && col < N; col++) {
+                indices.add(row * N + col);
+            }
+        }
+        return indices;
+    }
+
+    /** 1つ目/2つ目の box の中央セルインデックス（スナップ先と一致させるため）。 */
+    getBoxCenterCellIndex(boxNum) {
+        const N = this.gridCols;
+        const R = this.gridRows;
+        if (N < 3) return null;
+        const rowStart = R - 3;
+        const colStart = boxNum === 2 ? (N >= 4 ? 5 : 0) : (N >= 4 ? 2 : 0);
+        const centerRow = rowStart + 1;
+        const centerCol = colStart + 1;
+        return centerRow * N + centerCol;
+    }
+
+    /** 指定 cover の中心と対応する box のスナップ先（中央セル中心）との距離（px）。計算できないときは null。 */
+    getLidDistance(coverContainerId) {
+        const coverContainer = document.getElementById(coverContainerId);
+        if (!coverContainer) return null;
+        const boxNum = coverContainerId === 'cover-container-2' ? 2 : 1;
+        const centerCellIndex = this.getBoxCenterCellIndex(boxNum);
+        if (centerCellIndex == null) return null;
+        const target = this.getCellCenterPx(centerCellIndex);
         const coverRect = coverContainer.getBoundingClientRect();
-        const boxCenterX = boxRect.left + boxRect.width / 2;
-        const boxCenterY = boxRect.top + boxRect.height / 2;
         const coverCenterX = coverRect.left + coverRect.width / 2;
         const coverCenterY = coverRect.top + coverRect.height / 2;
-        const dist = Math.hypot(coverCenterX - boxCenterX, coverCenterY - boxCenterY);
-        return dist <= 15;
+        return Math.hypot(coverCenterX - target.x, coverCenterY - target.y);
+    }
+
+    /** 指定 cover が対応する box とほぼ同じ位置にあるか */
+    isLidClosedForContainer(coverContainerId) {
+        const dist = this.getLidDistance(coverContainerId);
+        return dist != null && dist <= 15;
+    }
+
+    /** 蓋が閉じているか（両方の cover がそれぞれの box の上にあるか） */
+    isLidClosed() {
+        return this.isLidClosedForContainer('cover-container') && this.isLidClosedForContainer('cover-container-2');
     }
 
     /**
@@ -236,7 +304,7 @@ class HandGridController {
         const N = this.gridCols;
         const R = this.gridRows;
         if (N < 3) return new Set();
-        const colStart = N >= 4 ? 1 : 0;
+        const colStart = N >= 4 ? 2 : 0;
         const rowStart = R - 3;
         const indices = new Set();
         for (let row = rowStart; row < rowStart + 3 && row < R; row++) {
@@ -257,12 +325,13 @@ class HandGridController {
     }
 
     /**
-     * 手のランドマークが box 内に存在するマス数（重複なし）
+     * 手のランドマークが指定 box 内に存在するマス数（重複なし）
      * @param {Array} landmarks - 手のランドマーク配列
+     * @param {number} [boxNum] - 1=最初のbox(72-94), 2=2つ目(75-97)。省略時は1
      * @returns {number}
      */
-    countHandCellsInBox(landmarks) {
-        const boxCells = this.getBoxCellIndices();
+    countHandCellsInBox(landmarks, boxNum = 1) {
+        const boxCells = boxNum === 2 ? this.getBox2CellIndices() : this.getBoxCellIndices();
         if (!boxCells.size || !landmarks || !landmarks.length) return 0;
         const handCellsInBox = new Set();
         for (const lm of landmarks) {
@@ -273,13 +342,14 @@ class HandGridController {
     }
 
     /**
-     * 腕（肘〜手首）の線分が box の 3×3 領域と重なっているか。
-     * @param {Array} poseLandmarks - MediaPipe Pose ランドマーク（13=左肘,15=左手首, 14=右肘,16=右手首）
+     * 腕（肘〜手首）の線分が指定矩形と重なっているか。
+     * @param {Array} poseLandmarks - MediaPipe Pose ランドマーク
      * @param {boolean} isLeftArm - true=左腕, false=右腕
+     * @param {{ left: number, top: number, width: number, height: number }} [rect] - 省略時は getBoxRectPx()
      * @returns {boolean}
      */
-    isArmSegmentOverBox(poseLandmarks, isLeftArm) {
-        const boxRect = this.getBoxRectPx();
+    isArmSegmentOverBox(poseLandmarks, isLeftArm, rect) {
+        const boxRect = rect || this.getBoxRectPx();
         if (!boxRect || !poseLandmarks || poseLandmarks.length < 33) return false;
         const W = window.innerWidth;
         const H = window.innerHeight;
@@ -416,26 +486,43 @@ class HandGridController {
         gridContainer.style.gridTemplateColumns = `repeat(${N}, 1fr)`;
         gridContainer.style.gridTemplateRows = `repeat(${this.gridRows}, 1fr)`;
         
-        // 3×3ブロック: box.png 固定 + cover.png 用コンテナ（掴むと3×3サイズのまま移動）
+        // 3×3ブロック1: セル72,73,74,82,83,84,92,93,94
         if (N >= 3) {
-            const colStart = N >= 4 ? 1 : 0;
-            const leftPct = (100 * colStart) / N;
-            const topPct = (100 * (N - 3)) / N;
-            const sizePct = (100 * 3) / N;
-            const boxOverlay = document.createElement('div');
-            boxOverlay.className = 'grid-cell-bg-3x3';
-            boxOverlay.style.cssText = `left:${leftPct}%;top:${topPct}%;width:${sizePct}%;height:${sizePct}%;background-image:url('image/box.png')`;
-            gridContainer.appendChild(boxOverlay);
-            const coverContainer = document.createElement('div');
-            coverContainer.id = 'cover-container';
-            coverContainer.className = 'grid-cell-bg-3x3 cover-container';
-            coverContainer.style.cssText = `left:${leftPct}%;top:${topPct}%;width:${sizePct}%;height:${sizePct}%`;
-            const coverEl = document.createElement('div');
-            coverEl.id = 'cover-element';
-            coverEl.className = 'cover-element';
-            coverEl.style.cssText = "width:100%;height:100%;background-image:url('image/cover.png');background-size:100% 100%;background-repeat:no-repeat;background-position:center";
-            coverContainer.appendChild(coverEl);
-            gridContainer.appendChild(coverContainer);
+            const rect = this.getBoxRectPx();
+            if (rect) {
+                const boxOverlay = document.createElement('div');
+                boxOverlay.className = 'grid-cell-bg-3x3';
+                boxOverlay.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;background-image:url('image/box.png')`;
+                gridContainer.appendChild(boxOverlay);
+                const coverContainer = document.createElement('div');
+                coverContainer.id = 'cover-container';
+                coverContainer.className = 'grid-cell-bg-3x3 cover-container';
+                coverContainer.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px`;
+                const coverEl = document.createElement('div');
+                coverEl.id = 'cover-element';
+                coverEl.className = 'cover-element';
+                coverEl.style.cssText = `position:absolute;left:0;top:0;width:${rect.width}px;height:${rect.height}px;background-image:url('image/cover.png');background-size:100% 100%;background-repeat:no-repeat;background-position:center`;
+                coverContainer.appendChild(coverEl);
+                gridContainer.appendChild(coverContainer);
+            }
+            // 3×3ブロック2: セル75,76,77,85,86,87,95,96,97
+            const rect2 = this.getBox2RectPx();
+            if (rect2) {
+                const boxOverlay2 = document.createElement('div');
+                boxOverlay2.className = 'grid-cell-bg-3x3';
+                boxOverlay2.style.cssText = `position:fixed;left:${rect2.left}px;top:${rect2.top}px;width:${rect2.width}px;height:${rect2.height}px;background-image:url('image/box.png')`;
+                gridContainer.appendChild(boxOverlay2);
+                const coverContainer2 = document.createElement('div');
+                coverContainer2.id = 'cover-container-2';
+                coverContainer2.className = 'grid-cell-bg-3x3 cover-container';
+                coverContainer2.style.cssText = `position:fixed;left:${rect2.left}px;top:${rect2.top}px;width:${rect2.width}px;height:${rect2.height}px`;
+                const coverEl2 = document.createElement('div');
+                coverEl2.id = 'cover-element-2';
+                coverEl2.className = 'cover-element';
+                coverEl2.style.cssText = `position:absolute;left:0;top:0;width:${rect2.width}px;height:${rect2.height}px;background-image:url('image/cover.png');background-size:100% 100%;background-repeat:no-repeat;background-position:center`;
+                coverContainer2.appendChild(coverEl2);
+                gridContainer.appendChild(coverContainer2);
+            }
         }
         
         for (let i = 0; i < total; i++) {
@@ -503,11 +590,17 @@ class HandGridController {
             this.processHands(hands);
         }
 
-        // 蓋が開いているとき、手のランドマークが存在するマス（active）または腕が box の上にあればスコア加算（マス数に応じて倍率）
-        if (!this.isLidClosed()) {
+        // 蓋が開いているとき、各 box ごとに手・腕がその box の上にあればスコア加算（マス数に応じて倍率）
+        const boxConfigs = [
+            { containerId: 'cover-container', getRect: () => this.getBoxRectPx() },
+            { containerId: 'cover-container-2', getRect: () => this.getBox2RectPx() }
+        ];
+        for (const cfg of boxConfigs) {
+            if (this.isLidClosedForContainer(cfg.containerId)) continue;
             if (hands && hands.length > 0) {
+                const boxNum = cfg.containerId === 'cover-container-2' ? 2 : 1;
                 for (let i = 0; i < hands.length; i++) {
-                    const count = this.countHandCellsInBox(hands[i].landmarks);
+                    const count = this.countHandCellsInBox(hands[i].landmarks, boxNum);
                     if (count > 0) {
                         const multiplier = 1 + (count - 1) * CONTAMINATION_MULTIPLIER_PER_EXTRA_CELL;
                         this.contaminationScore += CONTAMINATION_RATE_PER_FRAME * multiplier;
@@ -515,8 +608,11 @@ class HandGridController {
                 }
             }
             if (poseLandmarks && poseLandmarks.length >= 33) {
-                if (this.isArmSegmentOverBox(poseLandmarks, true)) this.contaminationScore += CONTAMINATION_RATE_PER_FRAME;
-                if (this.isArmSegmentOverBox(poseLandmarks, false)) this.contaminationScore += CONTAMINATION_RATE_PER_FRAME;
+                const rect = cfg.getRect();
+                if (rect) {
+                    if (this.isArmSegmentOverBox(poseLandmarks, true, rect)) this.contaminationScore += CONTAMINATION_RATE_PER_FRAME;
+                    if (this.isArmSegmentOverBox(poseLandmarks, false, rect)) this.contaminationScore += CONTAMINATION_RATE_PER_FRAME;
+                }
             }
         }
 
@@ -539,7 +635,7 @@ class HandGridController {
                     const gesture = this.gestureRecognizer.recognize(landmarks, handIndex);
                     const size = held.isCover ? this.get3x3BlockSizePx() : undefined;
                     this.updateHeldObjectPosition(held.element, gesture.palmCenter, size);
-                    if (!held.isCover) this.updateHeldObjectFlip(handIndex, hands[handIndex]);
+                    this.updateHeldObjectFlip(handIndex, hands[handIndex]);
                 }
             });
         }
@@ -671,16 +767,14 @@ class HandGridController {
             const handRotated = Math.abs(diff) > (Math.PI / 6);
             isBack = handRotated !== grabWasBack;
         }
-        // #region agent log
-        if (isBack !== held.isBack || (this._flipLogTick = (this._flipLogTick || 0) + 1) % 30 === 0) {
-            const currentZ = worldLandmarks ? this.getPalmNormalZ(worldLandmarks) : null;
-            fetch('http://127.0.0.1:7242/ingest/5e7dfa0e-623c-476f-bd4d-f4fc7374b309',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:updateHeldObjectFlip',message:'flip state',data:{grabNormalZ:held.grabNormalZ,currentNormalZ:currentZ,isBack,wasBack:held.isBack,useWorld:!!worldLandmarks},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'palm-normal'})}).catch(()=>{});
-        }
-        // #endregion
         if (isBack !== held.isBack) {
             held.isBack = isBack;
-            const inner = held.element.querySelector('.grid-object-inner');
-            if (inner) inner.classList.toggle('flipped', isBack);
+            if (held.isCover) {
+                held.element.classList.toggle('flipped', isBack);
+            } else {
+                const inner = held.element.querySelector('.grid-object-inner');
+                if (inner) inner.classList.toggle('flipped', isBack);
+            }
         }
     }
     
@@ -754,16 +848,14 @@ class HandGridController {
             }
             activeCellIndices.forEach((idx) => this.gridCells[idx].classList.add('active'));
 
-            // グー: 掴む（cover 優先: 3×3ブロック上なら cover を掴む。そうでなければマスのオブジェクト）
+            // グー: 掴む（cover 優先: 手のひらが載っている cover を掴む。そうでなければマスのオブジェクト）
             if (gesture.type === GESTURE_TYPES.FIST) {
                 if (!this.heldObjects[handIndex]) {
-                    const coverEl = document.getElementById('cover-element');
-                    const coverContainer = document.getElementById('cover-container');
-                    const parentMatch = !!(coverEl && coverContainer && coverEl.parentElement === coverContainer);
-                    const palmOverCover = parentMatch && this.isPalmOverCoverContainer(palmCenter);
-                    const wouldGrabCover = !!(coverEl && coverContainer && palmOverCover);
+                    const coverContainer = this.getCoverContainerUnderPalm(palmCenter);
+                    const coverEl = coverContainer ? coverContainer.querySelector('.cover-element') : null;
+                    const wouldGrabCover = !!(coverEl && coverContainer && coverEl.parentElement === coverContainer);
                     if (wouldGrabCover) {
-                        this.grabCover(handIndex, palmCenter);
+                        this.grabCover(handIndex, palmCenter, coverContainer, hand);
                     } else {
                         const arr = this.cellObjects[cellIndex];
                         if (cellIndex >= 0 && arr && arr.length > 0) {
@@ -794,10 +886,9 @@ class HandGridController {
         });
     }
     
-    /** cover.png を掴む（3×3サイズを維持したままドラッグレイヤーへ） */
-    grabCover(handIndex, palmCenter) {
-        const coverEl = document.getElementById('cover-element');
-        const coverContainer = document.getElementById('cover-container');
+    /** cover を掴む（3×3サイズを維持したままドラッグレイヤーへ）。マス上の四角オブジェクトと同様に裏表を追従。 */
+    grabCover(handIndex, palmCenter, coverContainer, hand) {
+        const coverEl = coverContainer ? coverContainer.querySelector('.cover-element') : null;
         if (!coverEl || !coverContainer || coverEl.parentElement !== coverContainer) return;
         const { width, height } = this.get3x3BlockSizePx();
         coverEl.remove();
@@ -807,19 +898,24 @@ class HandGridController {
         coverEl.style.height = height + 'px';
         coverEl.style.left = '';
         coverEl.style.top = '';
-        this.heldObjects[handIndex] = { element: coverEl, isCover: true };
+        const landmarks = hand.landmarks;
+        const worldLandmarks = hand.worldLandmarks;
+        const grabAngle = this.getPalmAngle(landmarks);
+        const grabNormalZ = worldLandmarks ? this.getPalmNormalZ(worldLandmarks) : null;
+        const grabWasBack = coverEl.classList.contains('flipped');
+        this.heldObjects[handIndex] = { element: coverEl, isCover: true, coverContainer, grabAngle, grabNormalZ, grabWasBack, isBack: grabWasBack };
         this.updateHeldObjectPosition(coverEl, palmCenter, { width, height });
     }
 
     /**
-     * cover.png を離す。離した瞬間の cover の表示位置をそのまま使って配置（ワープ防止）。
+     * cover を離す。掴んでいたコンテナに戻して配置（ワープ防止）。
      * @param {number} handIndex
      */
     dropCover(handIndex) {
         const held = this.heldObjects[handIndex];
         if (!held || !held.isCover) return;
         const coverEl = held.element;
-        const coverContainer = document.getElementById('cover-container');
+        const coverContainer = held.coverContainer || document.getElementById('cover-container');
         if (!coverContainer) return;
         const { width, height } = this.get3x3BlockSizePx();
         const rect = coverEl.getBoundingClientRect();
@@ -861,9 +957,6 @@ class HandGridController {
         const grabNormalZ = worldLandmarks ? this.getPalmNormalZ(worldLandmarks) : null;
         const inner = el.querySelector('.grid-object-inner');
         const grabWasBack = inner ? inner.classList.contains('flipped') : false;
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/5e7dfa0e-623c-476f-bd4d-f4fc7374b309',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:grabObject',message:'grab',data:{handIndex,cellIndex,grabAngleDeg:grabAngle*180/Math.PI,grabNormalZ,grabWasBack,hasWorld:!!worldLandmarks},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'palm-normal'})}).catch(()=>{});
-        // #endregion
         this.heldObjects[handIndex] = { element: el, fromCellIndex: cellIndex, grabAngle, grabNormalZ, grabWasBack, isBack: grabWasBack };
         this.updateHeldObjectPosition(el, palmCenter);
     }
@@ -874,9 +967,6 @@ class HandGridController {
         if (!held) return;
         const el = held.element;
         const inner = el.querySelector('.grid-object-inner');
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/5e7dfa0e-623c-476f-bd4d-f4fc7374b309',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:dropObject',message:'drop before',data:{cellIndex,isBack:held.isBack,styleLeft:el.style.left,styleTop:el.style.top,innerClass:inner?inner.className:''},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C,E',runId:'post-fix'})}).catch(()=>{});
-        // #endregion
         el.classList.remove('held');
         el.style.left = '';
         el.style.top = '';
